@@ -8,7 +8,7 @@ Orbithall은 Next.js SSG 블로그를 위한 독립형 댓글 시스템입니다
 
 ## 기술 스택
 
-- **Backend**: Go 1.21
+- **Backend**: Go 1.25
 - **Framework**: Chi (HTTP 라우터)
 - **Database**: PostgreSQL 16
 - **Infrastructure**: Docker + Docker Compose
@@ -34,8 +34,9 @@ orbithall/
 
 ## 사전 요구사항
 
-- Docker Desktop 설치
-- (선택) Go 1.21+ 설치 (로컬 개발 시)
+- Docker Desktop (필수)
+
+모든 개발 환경이 Docker 컨테이너에서 실행되므로 Go, PostgreSQL 등의 로컬 설치가 불필요합니다.
 
 ## 로컬 개발 환경 구성
 

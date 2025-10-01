@@ -1,5 +1,5 @@
-# Docker Compose 버전
-version: '3.8'
+# Docker Compose 설정 파일
+# version 필드는 Docker Compose v2부터 더 이상 필요하지 않음
 
 services:
   # PostgreSQL 데이터베이스 서비스
@@ -27,8 +27,10 @@ services:
 
   # Go API 서버 서비스
   api:
-    # 현재 디렉토리의 Dockerfile로 빌드
-    build: .
+    # 현재 디렉토리의 Dockerfile로 빌드 (development 스테이지 사용)
+    build:
+      context: .
+      target: development
     container_name: orbithall-api
     # 호스트:컨테이너 포트 매핑 (로컬에서 8080 포트로 접근 가능)
     ports:
@@ -47,8 +49,8 @@ services:
     # 로컬 파일 변경을 컨테이너에 실시간 반영 (hot reload용)
     volumes:
       - ./:/app
-    # Air를 사용해 파일 변경 시 자동 재시작
-    command: air -c .air.toml
+    # 컨테이너 시작 시 go.sum 생성 후 Air 실행
+    command: sh -c "go mod tidy && air -c .air.toml"
 
 # 볼륨 정의 (데이터 영속성을 위한 명명된 볼륨)
 volumes:
