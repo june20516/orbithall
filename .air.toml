@@ -1,0 +1,80 @@
+# Air 설정 파일 (Go 코드 변경 시 자동 재시작)
+# Air는 파일 변경을 감지하여 자동으로 Go 애플리케이션을 재빌드하고 재시작
+
+# 프로젝트 루트 디렉토리
+root = "."
+# 테스트 데이터 디렉토리 (감시 제외)
+testdata_dir = "testdata"
+# 빌드된 바이너리가 저장될 임시 디렉토리
+tmp_dir = "tmp"
+
+[build]
+  # 빌드된 바이너리에 전달할 인자
+  args_bin = []
+  # 빌드된 바이너리 파일 경로
+  bin = "./tmp/main"
+  # 빌드 명령어
+  cmd = "go build -o ./tmp/main ./cmd/api"
+  # 파일 변경 감지 후 재빌드까지 대기 시간 (밀리초)
+  delay = 1000
+  # 감시에서 제외할 디렉토리
+  exclude_dir = ["assets", "tmp", "vendor", "testdata"]
+  # 감시에서 제외할 파일
+  exclude_file = []
+  # 감시에서 제외할 파일 패턴 (정규식)
+  exclude_regex = ["_test.go"]
+  # 변경되지 않은 파일 제외 여부
+  exclude_unchanged = false
+  # 심볼릭 링크 추적 여부
+  follow_symlink = false
+  # 실행할 전체 바이너리 경로 (비어있으면 bin 사용)
+  full_bin = ""
+  # 감시할 디렉토리 (비어있으면 root 사용)
+  include_dir = []
+  # 감시할 파일 확장자
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  # 감시할 특정 파일
+  include_file = []
+  # 프로세스 종료 시 대기 시간
+  kill_delay = "0s"
+  # 빌드 에러 로그 파일
+  log = "build-errors.log"
+  # 폴링 방식으로 파일 변경 감지 (false: 이벤트 기반)
+  poll = false
+  # 폴링 간격 (밀리초, poll=true일 때만)
+  poll_interval = 0
+  # 재실행 여부
+  rerun = false
+  # 재실행 대기 시간 (밀리초)
+  rerun_delay = 500
+  # 인터럽트 시그널 전송 여부
+  send_interrupt = false
+  # 에러 발생 시 중단 여부
+  stop_on_error = false
+
+# 터미널 출력 색상 설정
+[color]
+  app = ""              # 앱 출력
+  build = "yellow"      # 빌드 로그
+  main = "magenta"      # 메인 로그
+  runner = "green"      # 러너 로그
+  watcher = "cyan"      # 감시자 로그
+
+# 로그 설정
+[log]
+  # 메인 로그만 출력
+  main_only = false
+  # 타임스탬프 표시
+  time = false
+
+# 기타 설정
+[misc]
+  # 종료 시 임시 파일 정리
+  clean_on_exit = false
+
+# 화면 설정
+[screen]
+  # 재빌드 시 화면 초기화
+  clear_on_rebuild = false
+  # 스크롤 유지
+  keep_scroll = true
