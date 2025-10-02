@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -8,9 +9,42 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/june20516/orbithall/internal/database"
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run은 애플리케이션의 메인 로직을 실행합니다
+// 테스트 가능하도록 main()에서 분리되었습니다
+func run() error {
+	// ============================================
+	// 데이터베이스 연결
+	// ============================================
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return fmt.Errorf("DATABASE_URL environment variable is required")
+	}
+
+	db, err := database.New(databaseURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer database.Close(db)
+
+	log.Println("Database connected successfully")
+
+	// db 변수는 현재 사용되지 않지만 컴파일 에러 방지를 위해 명시적으로 무시
+	// 향후 댓글 CRUD API 구현 시 핸들러에 전달되어 사용될 예정
+	// 현재는 데이터베이스 연결 및 Connection Pool 설정 검증 목적
+	_ = db
+
+	// ============================================
+	// 라우터 설정
+	// ============================================
 	// Chi 라우터 생성
 	// Chi는 가볍고 빠른 HTTP 라우터 라이브러리
 	r := chi.NewRouter()
@@ -83,8 +117,9 @@ func main() {
 
 	log.Printf("Server starting on port %s", port)
 	// HTTP 서버 시작 (블로킹)
-	// err가 nil이 아니면 치명적 오류로 종료
 	if err := http.ListenAndServe(":"+port, r); err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("server failed: %w", err)
 	}
+
+	return nil
 }

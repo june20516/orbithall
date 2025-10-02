@@ -38,3 +38,7 @@ Thumbs.db
 # Dependencies (auto-generated)
 go.sum
 vendor/
+
+# build binary
+api
+orbithall
