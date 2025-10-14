@@ -40,5 +40,5 @@ go.sum
 vendor/
 
 # build binary
-api
-orbithall
+/api
+/orbithall
