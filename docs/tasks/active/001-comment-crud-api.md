@@ -922,7 +922,7 @@ go get github.com/microcosm-cc/bluemonday
 
 ### 코드 작성
 - [x] `internal/sanitizer/html.go` 생성 (HTML sanitization)
-- [ ] `internal/validators/comment.go` 생성 (입력 검증)
+- [x] `internal/validators/comment.go` 생성 (입력 검증)
 - [ ] `internal/handlers/middleware.go` 생성 (인증 미들웨어, rate limiting)
 - [ ] `internal/handlers/comments.go` 생성 (CRUD 핸들러)
 - [ ] `internal/database/comments.go` 생성 (DB 메서드)
@@ -932,6 +932,7 @@ go get github.com/microcosm-cc/bluemonday
 
 ### 테스트
 - [x] HTML sanitization 테스트 (스크립트 태그 제거)
+- [x] 입력 검증 테스트 (Create/Update/Delete)
 - [ ] 댓글 생성 테스트 (정상/실패 케이스)
 - [ ] 댓글 조회 테스트 (페이지네이션, 트리 구조, IP 마스킹)
 - [ ] 댓글 수정 테스트 (비밀번호, 시간 제한, IP 업데이트)
