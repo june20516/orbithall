@@ -927,7 +927,7 @@ go get github.com/microcosm-cc/bluemonday
 - [ ] `internal/handlers/comments.go` 생성 (CRUD 핸들러)
 - [ ] `internal/database/comments.go` 생성 (DB 메서드)
 - [ ] `internal/database/posts.go` 보완 (Post 관련 메서드)
-- [ ] `internal/models/comment.go` 보완 (Replies, IPAddressMasked 필드 추가)
+- [x] `internal/models/comment.go` 보완 (Replies, IPAddressMasked 필드 추가)
 - [ ] `cmd/api/main.go` 라우팅 추가
 
 ### 테스트
