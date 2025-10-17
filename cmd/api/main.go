@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/joho/godotenv"
 	"github.com/june20516/orbithall/internal/database"
 )
 
@@ -21,6 +22,15 @@ func main() {
 // run은 애플리케이션의 메인 로직을 실행합니다
 // 테스트 가능하도록 main()에서 분리되었습니다
 func run() error {
+	// ============================================
+	// 환경변수 로드 (.env 파일, 로컬 개발용)
+	// ============================================
+	// production 환경에서는 .env 파일을 사용하지 않음
+	// Railway 같은 배포 환경에서는 환경변수를 직접 설정
+	if os.Getenv("ENV") != "production" {
+		_ = godotenv.Load() // 에러 무시 (.env 파일 없어도 OK)
+	}
+
 	// ============================================
 	// 데이터베이스 연결
 	// ============================================

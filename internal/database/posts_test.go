@@ -2,26 +2,11 @@ package database
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
-// setupTestDB는 테스트용 데이터베이스 연결을 생성합니다
-func setupTestDB(t *testing.T) *sql.DB {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set, skipping integration test")
-	}
-
-	db, err := New(databaseURL)
-	if err != nil {
-		t.Fatalf("failed to setup test db: %v", err)
-	}
-
-	return db
-}
-
 // cleanupPosts는 테스트 후 posts 테이블을 정리합니다
+// TRUNCATE ... CASCADE를 사용하여 관련된 comments도 함께 정리합니다
 func cleanupPosts(t *testing.T, db *sql.DB) {
 	_, err := db.Exec("TRUNCATE posts RESTART IDENTITY CASCADE")
 	if err != nil {
