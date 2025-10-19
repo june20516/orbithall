@@ -45,7 +45,7 @@ func CreateComment(db *sql.DB, postID int64, parentID *int64, authorName, passwo
 		`, *parentID).Scan(&parentParentID)
 
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("parent comment not found")
+			return nil, ErrParentCommentNotFound
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to query parent comment: %w", err)
@@ -53,7 +53,7 @@ func CreateComment(db *sql.DB, postID int64, parentID *int64, authorName, passwo
 
 		// 부모 댓글이 이미 대댓글이면 (parent_id가 null이 아니면) 2depth이므로 거부
 		if parentParentID.Valid {
-			return nil, fmt.Errorf("nested reply not allowed (max depth is 1)")
+			return nil, ErrNestedReplyNotAllowed
 		}
 	}
 

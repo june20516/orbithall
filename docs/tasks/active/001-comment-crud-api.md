@@ -922,13 +922,19 @@ go get github.com/microcosm-cc/bluemonday
 
 ### 코드 작성
 - [x] `internal/sanitizer/html.go` 생성 (HTML sanitization)
-- [x] `internal/validators/comment.go` 생성 (입력 검증)
+- [x] `internal/validators/comment.go` 생성 (입력 검증) + JSON 태그 추가
 - [x] `internal/testhelpers/testhelpers.go` 생성 (공통 테스트 헬퍼)
 - [x] `internal/handlers/middleware.go` 생성 (API 키 인증 미들웨어)
-- [ ] `internal/handlers/comments.go` 생성 (CRUD 핸들러)
-- [x] `internal/database/comments.go` 생성 (DB 메서드)
+- [x] `internal/handlers/helpers.go` 생성 (HTTP 공통 헬퍼 함수)
+- [x] `internal/database/errors.go` 생성 (Sentinel errors 정의)
+- [x] `internal/database/comments.go` 생성 (DB 메서드) + Sentinel errors 적용
 - [x] `internal/database/posts.go` 보완 (Post 관련 메서드)
 - [x] `internal/models/comment.go` 보완 (Replies, IPAddressMasked 필드 추가)
+- [ ] `internal/handlers/comments.go` - **CreateComment 핸들러만 완료** (TDD)
+  - [x] CreateComment 구현 및 테스트 (6개 시나리오 통과)
+  - [ ] ListComments 구현 (TODO 스텁 상태)
+  - [ ] UpdateComment 구현 (TODO 스텁 상태)
+  - [ ] DeleteComment 구현 (TODO 스텁 상태)
 - [ ] `cmd/api/main.go` 라우팅 추가
 
 **Note**: Rate Limiting 미들웨어는 이 작업 범위에서 제외하고 별도 작업으로 진행 예정
@@ -942,7 +948,11 @@ go get github.com/microcosm-cc/bluemonday
 - [x] 댓글 삭제 테스트 (soft delete) - Database 레이어
 - [x] 대댓글 생성/조회 테스트 (1depth 제한 검증) - Database 레이어
 - [x] 인증 미들웨어 테스트 (API 키 검증, CORS 검증) - Handler 레이어
-- [ ] 댓글 핸들러 테스트 (사이트 격리, 비밀번호 검증 등) - Handler 레이어
+- [ ] 댓글 핸들러 테스트 - Handler 레이어
+  - [x] CreateComment 핸들러 테스트 (6개 시나리오 통과)
+  - [ ] ListComments 핸들러 테스트
+  - [ ] UpdateComment 핸들러 테스트
+  - [ ] DeleteComment 핸들러 테스트
 - [x] DB 검증 (해싱, soft delete) - Integration 테스트로 완료
 
 **Note**: Rate Limiting 테스트는 별도 작업으로 진행 예정
@@ -1011,7 +1021,7 @@ go get github.com/microcosm-cc/bluemonday
   - `.claude-project-rules.md`에 작업 관리 방식 섹션 추가
   - `.claude/commands/warmup.md` slash command 생성
 
-### [2025-10-20] API 키 인증 미들웨어 구현 완료
+### [2025-10-20 오전] API 키 인증 미들웨어 구현 완료
 - 공통 테스트 헬퍼 패키지 생성
   - `internal/testhelpers/testhelpers.go` 생성
   - `SetupTestDB()`: 데이터베이스 연결 헬퍼
@@ -1041,3 +1051,52 @@ go get github.com/microcosm-cc/bluemonday
   - 1개 헬퍼 함수 단위 테스트 (4개 서브 케이스)
 - 전체 프로젝트 테스트 검증: 모든 패키지 통과
 - Rate Limiting은 별도 작업으로 분리 예정
+
+### [2025-10-20 오후] CreateComment 핸들러 구현 완료 (TDD)
+- HTTP 공통 헬퍼 함수 분리
+  - `internal/handlers/helpers.go` 생성
+  - `GetIPAddress()`: X-Forwarded-For → X-Real-IP → RemoteAddr 우선순위
+  - `GetUserAgent()`: User-Agent 헤더 추출
+  - `ParseInt64Param()`, `ParseQueryInt()`: 파라미터 파싱 유틸리티
+- Database Sentinel Errors 도입 (에러 처리 개선)
+  - `internal/database/errors.go` 생성
+  - 5개 sentinel errors 정의
+    - `ErrParentCommentNotFound`: 부모 댓글 없음
+    - `ErrNestedReplyNotAllowed`: 2-depth 댓글 차단
+    - `ErrCommentNotFound`: 댓글 없음
+    - `ErrWrongPassword`: 비밀번호 불일치
+    - `ErrEditTimeExpired`: 수정 시간 초과
+  - `database.CreateComment()` 수정: 문자열 에러 대신 sentinel errors 반환
+  - 장점: 타입 안전성, IDE 지원, 리팩토링 용이, `errors.Is()` 활용
+- Validator JSON 태그 추가
+  - `internal/validators/comment.go` 수정
+  - `CommentCreateInput` 구조체에 JSON 태그 추가 (`author_name`, `password`, `content`, `parent_id`)
+  - JSON unmarshal이 정상 작동하도록 수정
+- CreateComment 핸들러 구현 (TDD 방식)
+  - **Red 단계**: 6개 테스트 작성 (`internal/handlers/comments_test.go`)
+    - 최상위 댓글 생성 성공
+    - 대댓글 생성 성공 (1-depth)
+    - 2-depth 댓글 차단 (400 Bad Request)
+    - 입력 검증 실패 (빈 필드, 짧은 비밀번호)
+    - XSS 공격 차단 (HTML sanitization)
+    - 존재하지 않는 부모 댓글 처리 (404 Not Found)
+  - **Green 단계**: `CreateComment()` 핸들러 구현
+    - Context에서 사이트 정보 추출
+    - Chi URL 파라미터에서 slug 추출
+    - JSON 요청 본문 파싱
+    - Validator로 입력 검증
+    - Sanitizer로 HTML 제거 (XSS 방어)
+    - GetOrCreatePost로 포스트 자동 생성
+    - CreateComment로 댓글 생성 (bcrypt 해싱, 2-depth 검증)
+    - Sentinel errors로 에러 타입 확인 (`errors.Is()`)
+    - IncrementCommentCount로 댓글 수 증가
+    - IP 주소 마스킹 후 201 Created 응답
+  - **Refactor 단계**: 문자열 비교를 sentinel errors로 개선
+  - 6개 테스트 모두 통과 (Green)
+- CommentHandler 기본 구조 생성
+  - `internal/handlers/comments.go` 생성
+  - `CommentHandler` 구조체, `NewCommentHandler()` 생성자
+  - `maskIPAndSetReplies()` 헬퍼 함수 (향후 ListComments에서 사용)
+  - `EditTimeLimit` 상수 정의 (30분)
+  - ListComments, UpdateComment, DeleteComment는 TODO 스텁 상태
+- 다음 작업: ListComments, UpdateComment, DeleteComment 핸들러 구현 (TDD 방식)

@@ -21,10 +21,10 @@ func (v ValidationErrors) Error() string {
 
 // CommentCreateInput은 댓글 생성 시 입력 데이터 구조체
 type CommentCreateInput struct {
-	AuthorName string // 작성자 이름
-	Password   string // 비밀번호 (수정/삭제 시 사용)
-	Content    string // 댓글 내용
-	ParentID   *int   // 대댓글인 경우 부모 댓글 ID (선택)
+	AuthorName string `json:"author_name"` // 작성자 이름
+	Password   string `json:"password"`    // 비밀번호 (수정/삭제 시 사용)
+	Content    string `json:"content"`     // 댓글 내용
+	ParentID   *int   `json:"parent_id"`   // 대댓글인 경우 부모 댓글 ID (선택)
 }
 
 // Validate는 댓글 생성 입력값을 검증
