@@ -1,4 +1,4 @@
-# [WIP] 댓글 CRUD API 구현
+# 댓글 CRUD API 구현
 
 ## 작성일
 2025-10-14
@@ -923,12 +923,15 @@ go get github.com/microcosm-cc/bluemonday
 ### 코드 작성
 - [x] `internal/sanitizer/html.go` 생성 (HTML sanitization)
 - [x] `internal/validators/comment.go` 생성 (입력 검증)
-- [ ] `internal/handlers/middleware.go` 생성 (인증 미들웨어, rate limiting)
+- [x] `internal/testhelpers/testhelpers.go` 생성 (공통 테스트 헬퍼)
+- [x] `internal/handlers/middleware.go` 생성 (API 키 인증 미들웨어)
 - [ ] `internal/handlers/comments.go` 생성 (CRUD 핸들러)
 - [x] `internal/database/comments.go` 생성 (DB 메서드)
 - [x] `internal/database/posts.go` 보완 (Post 관련 메서드)
 - [x] `internal/models/comment.go` 보완 (Replies, IPAddressMasked 필드 추가)
 - [ ] `cmd/api/main.go` 라우팅 추가
+
+**Note**: Rate Limiting 미들웨어는 이 작업 범위에서 제외하고 별도 작업으로 진행 예정
 
 ### 테스트
 - [x] HTML sanitization 테스트 (스크립트 태그 제거)
@@ -938,10 +941,11 @@ go get github.com/microcosm-cc/bluemonday
 - [x] 댓글 수정 테스트 (정상/실패 케이스) - Database 레이어
 - [x] 댓글 삭제 테스트 (soft delete) - Database 레이어
 - [x] 대댓글 생성/조회 테스트 (1depth 제한 검증) - Database 레이어
-- [ ] 인증 실패 테스트 (API 키 검증) - Handler 레이어
-- [ ] Rate limiting 테스트 - Handler 레이어
-- [ ] 사이트 격리 테스트 (멀티 테넌시) - Handler 레이어
+- [x] 인증 미들웨어 테스트 (API 키 검증, CORS 검증) - Handler 레이어
+- [ ] 댓글 핸들러 테스트 (사이트 격리, 비밀번호 검증 등) - Handler 레이어
 - [x] DB 검증 (해싱, soft delete) - Integration 테스트로 완료
+
+**Note**: Rate Limiting 테스트는 별도 작업으로 진행 예정
 
 ### 문서
 - [x] API 명세 작성
@@ -1006,3 +1010,34 @@ go get github.com/microcosm-cc/bluemonday
 - 프로젝트 warmup 자동화
   - `.claude-project-rules.md`에 작업 관리 방식 섹션 추가
   - `.claude/commands/warmup.md` slash command 생성
+
+### [2025-10-20] API 키 인증 미들웨어 구현 완료
+- 공통 테스트 헬퍼 패키지 생성
+  - `internal/testhelpers/testhelpers.go` 생성
+  - `SetupTestDB()`: 데이터베이스 연결 헬퍼
+  - `CleanupSites()`, `CleanupPosts()`, `CleanupComments()`: 테이블 정리
+  - `CreateTestSite()`, `CreateTestPost()`, `CreateTestSiteWithID()`: 테스트 데이터 생성
+  - database, handlers 패키지에서 공통 사용 가능
+- `internal/handlers/middleware.go` 구현 완료
+  - `AuthMiddleware()`: API 키 기반 인증 미들웨어
+    - X-Orbithall-API-Key 헤더 검증
+    - GetSiteByAPIKey() 호출 (1분 TTL 캐시 활용)
+    - CORS Origin 검증 (대소문자 무시, Origin 없으면 스킵)
+    - Context에 사이트 정보 저장
+  - 헬퍼 함수
+    - `respondJSON()`, `respondError()`: 일관된 JSON 응답
+    - `GetSiteFromContext()`: Context에서 사이트 정보 추출
+    - `isOriginAllowed()`: CORS Origin 배열 검증
+  - 에러 코드 상수 10개 정의
+- `internal/handlers/middleware_test.go` 작성 및 통과
+  - 7개 AuthMiddleware 통합 테스트
+    - API 키 헤더 없음 (401)
+    - 잘못된 API 키 (403)
+    - 비활성 사이트 (403)
+    - 허용되지 않은 Origin (403)
+    - 유효한 API 키 + Origin (200, Context 저장 확인)
+    - Origin 헤더 없음 (200, 서버 간 통신)
+    - 대소문자 무시 Origin 매칭 (200)
+  - 1개 헬퍼 함수 단위 테스트 (4개 서브 케이스)
+- 전체 프로젝트 테스트 검증: 모든 패키지 통과
+- Rate Limiting은 별도 작업으로 분리 예정
