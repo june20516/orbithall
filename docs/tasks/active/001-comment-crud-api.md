@@ -930,9 +930,9 @@ go get github.com/microcosm-cc/bluemonday
 - [x] `internal/database/comments.go` 생성 (DB 메서드) + Sentinel errors 적용
 - [x] `internal/database/posts.go` 보완 (Post 관련 메서드)
 - [x] `internal/models/comment.go` 보완 (Replies, IPAddressMasked 필드 추가)
-- [ ] `internal/handlers/comments.go` - **CreateComment 핸들러만 완료** (TDD)
+- [ ] `internal/handlers/comments.go` - **CreateComment, ListComments 완료** (TDD)
   - [x] CreateComment 구현 및 테스트 (6개 시나리오 통과)
-  - [ ] ListComments 구현 (TODO 스텁 상태)
+  - [x] ListComments 구현 및 테스트 (4개 시나리오 통과)
   - [ ] UpdateComment 구현 (TODO 스텁 상태)
   - [ ] DeleteComment 구현 (TODO 스텁 상태)
 - [ ] `cmd/api/main.go` 라우팅 추가
@@ -950,7 +950,7 @@ go get github.com/microcosm-cc/bluemonday
 - [x] 인증 미들웨어 테스트 (API 키 검증, CORS 검증) - Handler 레이어
 - [ ] 댓글 핸들러 테스트 - Handler 레이어
   - [x] CreateComment 핸들러 테스트 (6개 시나리오 통과)
-  - [ ] ListComments 핸들러 테스트
+  - [x] ListComments 핸들러 테스트 (4개 시나리오 통과)
   - [ ] UpdateComment 핸들러 테스트
   - [ ] DeleteComment 핸들러 테스트
 - [x] DB 검증 (해싱, soft delete) - Integration 테스트로 완료
@@ -1096,7 +1096,39 @@ go get github.com/microcosm-cc/bluemonday
 - CommentHandler 기본 구조 생성
   - `internal/handlers/comments.go` 생성
   - `CommentHandler` 구조체, `NewCommentHandler()` 생성자
-  - `maskIPAndSetReplies()` 헬퍼 함수 (향후 ListComments에서 사용)
   - `EditTimeLimit` 상수 정의 (30분)
   - ListComments, UpdateComment, DeleteComment는 TODO 스텁 상태
-- 다음 작업: ListComments, UpdateComment, DeleteComment 핸들러 구현 (TDD 방식)
+
+### [2025-10-20 저녁] ListComments 핸들러 구현 완료 (TDD)
+- ListComments 핸들러 구현 (TDD 방식)
+  - **Red 단계**: 4개 테스트 작성
+    - `TestListComments_Success_TreeStructure`: 계층 구조 조회 (최상위 2개, 대댓글 2개)
+    - `TestListComments_Success_Pagination`: 페이지네이션 (limit=2, 3개 댓글)
+    - `TestListComments_Success_EmptyPost`: 존재하지 않는 포스트 (빈 배열 반환)
+    - `TestListComments_DeletedComments`: 삭제된 댓글 필터링 규칙 검증
+  - **Green 단계**: `ListComments()` 핸들러 구현
+    - Context에서 사이트 정보 추출
+    - URL 파라미터에서 slug 추출
+    - 쿼리 파라미터 파싱 (page, limit) 및 유효성 검증
+    - 포스트 조회 (없으면 빈 배열 반환)
+    - offset 계산: `(page - 1) * limit`
+    - database.ListComments 호출 (limit, offset 순서)
+    - 삭제된 댓글 필터링 및 IP 마스킹
+    - 페이지네이션 메타데이터와 함께 200 OK 응답
+  - **Refactor 단계**: 삭제된 댓글 처리 로직 개선 및 명확화
+- 삭제된 댓글 필터링 로직 구현
+  - `filterDeletedCommentsAndMaskIP()` 헬퍼 함수 구현
+  - 삭제된 댓글 필터링 규칙 (Soft Delete):
+    - 대댓글이 있는 삭제된 댓글: 계층 구조 유지를 위해 응답에 포함
+      - `author_name`과 `content`를 빈 문자열로 설정
+      - `is_deleted: true` 플래그로 클라이언트가 판단
+    - 대댓글이 없는 삭제된 댓글: 응답 배열에서 완전히 제거
+  - IP 마스킹 통합 처리
+- 관심사의 분리 개선
+  - 함수명: `processDeletedCommentsAndMaskIP` → `filterDeletedCommentsAndMaskIP`
+  - 주석 개선: "삭제된 댓글 처리" → "삭제된 댓글을 필터링하고 모든 댓글의 IP를 마스킹"
+  - API 책임: 데이터만 제공 (`is_deleted: true`, 빈 문자열)
+  - 클라이언트 책임: 표시 로직 담당 (다국어, 커스텀 메시지)
+- 4개 테스트 모두 통과
+- 전체 handlers 패키지 테스트: 18개 통과 (CreateComment 6개, ListComments 4개, AuthMiddleware 8개)
+- 다음 작업: UpdateComment, DeleteComment 핸들러 구현 (TDD 방식)

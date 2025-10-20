@@ -341,6 +341,289 @@ func TestCreateComment_Fail_ParentNotFound(t *testing.T) {
 }
 
 // ============================================
+// ListComments 테스트
+// ============================================
+
+func TestListComments_Success_TreeStructure(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+	defer testhelpers.CleanupSites(t, db)
+
+	// Given: 사이트, 포스트, 댓글 계층 구조 생성
+	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "list.test.com", []string{"http://localhost:3000"}, true)
+	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+
+	// 최상위 댓글 2개
+	parent1, _ := database.CreateComment(db, post.ID, nil, "Parent1", "pass123", "첫 번째 댓글", "127.0.0.1", "Agent")
+	_, _ = database.CreateComment(db, post.ID, nil, "Parent2", "pass123", "두 번째 댓글", "127.0.0.1", "Agent")
+
+	// parent1에 대댓글 2개
+	database.CreateComment(db, post.ID, &parent1.ID, "Child1", "pass123", "첫 번째 대댓글", "127.0.0.1", "Agent")
+	database.CreateComment(db, post.ID, &parent1.ID, "Child2", "pass123", "두 번째 대댓글", "127.0.0.1", "Agent")
+
+	handler := NewCommentHandler(db)
+
+	// HTTP 요청 생성
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?page=1&limit=50", nil)
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	// Chi URL 파라미터 설정
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: ListComments 호출
+	handler.ListComments(rec, req)
+
+	// Then: 200 OK
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	// 응답 파싱
+	var response struct {
+		Comments []struct {
+			ID         int64  `json:"id"`
+			AuthorName string `json:"author_name"`
+			Content    string `json:"content"`
+			Replies    []struct {
+				ID         int64  `json:"id"`
+				AuthorName string `json:"author_name"`
+				Content    string `json:"content"`
+				ParentID   *int64 `json:"parent_id"`
+			} `json:"replies"`
+		} `json:"comments"`
+		Pagination struct {
+			CurrentPage   int `json:"current_page"`
+			TotalPages    int `json:"total_pages"`
+			TotalComments int `json:"total_comments"`
+			PerPage       int `json:"per_page"`
+		} `json:"pagination"`
+	}
+
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// 최상위 댓글 2개
+	if len(response.Comments) != 2 {
+		t.Errorf("Expected 2 comments, got %d", len(response.Comments))
+	}
+
+	// 첫 번째 댓글에 대댓글 2개
+	if len(response.Comments[0].Replies) != 2 {
+		t.Errorf("Expected 2 replies for first comment, got %d", len(response.Comments[0].Replies))
+	}
+
+	// 두 번째 댓글에 대댓글 0개
+	if len(response.Comments[1].Replies) != 0 {
+		t.Errorf("Expected 0 replies for second comment, got %d", len(response.Comments[1].Replies))
+	}
+
+	// parent_id 확인
+	if *response.Comments[0].Replies[0].ParentID != parent1.ID {
+		t.Errorf("Expected parent_id %d, got %d", parent1.ID, *response.Comments[0].Replies[0].ParentID)
+	}
+
+	// 페이지네이션 확인
+	if response.Pagination.TotalComments != 2 {
+		t.Errorf("Expected total_comments 2, got %d", response.Pagination.TotalComments)
+	}
+	if response.Pagination.CurrentPage != 1 {
+		t.Errorf("Expected current_page 1, got %d", response.Pagination.CurrentPage)
+	}
+}
+
+func TestListComments_Success_Pagination(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+	defer testhelpers.CleanupSites(t, db)
+
+	// Given: 사이트, 포스트, 최상위 댓글 3개 생성
+	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "pagination.test.com", []string{"http://localhost:3000"}, true)
+	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+
+	for i := 1; i <= 3; i++ {
+		database.CreateComment(db, post.ID, nil, "Author", "pass123", "댓글 내용", "127.0.0.1", "Agent")
+	}
+
+	handler := NewCommentHandler(db)
+
+	// limit=2로 첫 페이지 조회
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?page=1&limit=2", nil)
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: ListComments 호출
+	handler.ListComments(rec, req)
+
+	// Then: 200 OK
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var response struct {
+		Comments   []interface{} `json:"comments"`
+		Pagination struct {
+			CurrentPage   int `json:"current_page"`
+			TotalPages    int `json:"total_pages"`
+			TotalComments int `json:"total_comments"`
+			PerPage       int `json:"per_page"`
+		} `json:"pagination"`
+	}
+
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	// 페이지네이션 확인
+	if len(response.Comments) != 2 {
+		t.Errorf("Expected 2 comments in first page, got %d", len(response.Comments))
+	}
+	if response.Pagination.TotalComments != 3 {
+		t.Errorf("Expected total_comments 3, got %d", response.Pagination.TotalComments)
+	}
+	if response.Pagination.TotalPages != 2 {
+		t.Errorf("Expected total_pages 2, got %d", response.Pagination.TotalPages)
+	}
+	if response.Pagination.PerPage != 2 {
+		t.Errorf("Expected per_page 2, got %d", response.Pagination.PerPage)
+	}
+}
+
+func TestListComments_Success_EmptyPost(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+	defer testhelpers.CleanupSites(t, db)
+
+	// Given: 사이트만 생성 (포스트 없음)
+	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "empty.test.com", []string{"http://localhost:3000"}, true)
+	site, _ := database.GetSiteByAPIKey(db, apiKey)
+
+	handler := NewCommentHandler(db)
+
+	// 존재하지 않는 포스트 조회
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/nonexistent/comments", nil)
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "nonexistent")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: ListComments 호출
+	handler.ListComments(rec, req)
+
+	// Then: 200 OK with empty array
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var response struct {
+		Comments   []interface{} `json:"comments"`
+		Pagination struct {
+			TotalComments int `json:"total_comments"`
+		} `json:"pagination"`
+	}
+
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	// 빈 배열
+	if len(response.Comments) != 0 {
+		t.Errorf("Expected 0 comments, got %d", len(response.Comments))
+	}
+	if response.Pagination.TotalComments != 0 {
+		t.Errorf("Expected total_comments 0, got %d", response.Pagination.TotalComments)
+	}
+}
+
+func TestListComments_DeletedComments(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+	defer testhelpers.CleanupSites(t, db)
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "deleted.test.com", []string{"http://localhost:3000"}, true)
+	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+
+	// 최상위 댓글 (대댓글 있음)
+	parent, _ := database.CreateComment(db, post.ID, nil, "Parent", "pass123", "부모 댓글", "127.0.0.1", "Agent")
+	database.CreateComment(db, post.ID, &parent.ID, "Child", "pass123", "자식 댓글", "127.0.0.1", "Agent")
+
+	// 최상위 댓글 (대댓글 없음)
+	alone, _ := database.CreateComment(db, post.ID, nil, "Alone", "pass123", "혼자 댓글", "127.0.0.1", "Agent")
+
+	// 삭제 처리
+	database.DeleteComment(db, parent.ID)
+	database.DeleteComment(db, alone.ID)
+
+	handler := NewCommentHandler(db)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments", nil)
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: ListComments 호출
+	handler.ListComments(rec, req)
+
+	// Then: 200 OK
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var response struct {
+		Comments []struct {
+			ID         int64  `json:"id"`
+			AuthorName string `json:"author_name"`
+			Content    string `json:"content"`
+			IsDeleted  bool   `json:"is_deleted"`
+			Replies    []interface{} `json:"replies"`
+		} `json:"comments"`
+	}
+
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	// 대댓글이 있는 parent는 빈 값으로 포함 (isDeleted=true)
+	if len(response.Comments) != 1 {
+		t.Errorf("Expected 1 comment (deleted with replies), got %d", len(response.Comments))
+	}
+
+	// 삭제된 댓글은 author_name과 content가 빈 문자열
+	if response.Comments[0].AuthorName != "" {
+		t.Errorf("Expected author_name empty string, got '%s'", response.Comments[0].AuthorName)
+	}
+
+	if response.Comments[0].Content != "" {
+		t.Errorf("Expected content empty string, got '%s'", response.Comments[0].Content)
+	}
+
+	// isDeleted 플래그로 삭제된 댓글임을 클라이언트가 판단
+	if !response.Comments[0].IsDeleted {
+		t.Error("Expected is_deleted true")
+	}
+
+	// alone은 대댓글이 없으므로 목록에서 완전히 제외됨
+}
+
+// ============================================
 // 테스트 헬퍼
 // ============================================
 
