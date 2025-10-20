@@ -12,6 +12,7 @@ import (
 	"github.com/june20516/orbithall/internal/models"
 	"github.com/june20516/orbithall/internal/sanitizer"
 	"github.com/june20516/orbithall/internal/validators"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ============================================
@@ -117,12 +118,13 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// 4. 입력 검증
 	if err := input.Validate(); err != nil {
-		validationErrs, ok := err.(validators.ValidationErrors)
-		if ok {
+		// 구조화된 검증 에러인 경우 상세 정보 포함
+		if validationErrs, ok := err.(validators.ValidationErrors); ok {
 			respondError(w, http.StatusBadRequest, ErrInvalidInput, "Validation failed", validationErrs)
-		} else {
-			respondError(w, http.StatusBadRequest, ErrInvalidInput, err.Error(), nil)
+			return
 		}
+		// 일반 에러인 경우 메시지만 반환
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, err.Error(), nil)
 		return
 	}
 
@@ -272,8 +274,114 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 // UpdateComment는 기존 댓글을 수정합니다
 // PUT /api/comments/:id
 func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
-	// TODO: 구현 예정
-	respondJSON(w, http.StatusOK, map[string]string{"message": "UpdateComment - TODO"})
+	// 1. Context에서 사이트 정보 추출
+	site := GetSiteFromContext(r.Context())
+	if site == nil {
+		respondError(w, http.StatusUnauthorized, ErrMissingAPIKey, "Site not found in context", nil)
+		return
+	}
+
+	// 2. URL 파라미터에서 댓글 ID 추출
+	commentIDStr := chi.URLParam(r, "id")
+	commentID, err := ParseInt64Param(commentIDStr)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid comment ID", nil)
+		return
+	}
+
+	// 3. 요청 본문 파싱
+	var input validators.CommentUpdateInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid request body", nil)
+		return
+	}
+
+	// 4. 입력 검증
+	if err := input.Validate(); err != nil {
+		// 구조화된 검증 에러인 경우 상세 정보 포함
+		if validationErrs, ok := err.(validators.ValidationErrors); ok {
+			respondError(w, http.StatusBadRequest, ErrInvalidInput, "Validation failed", validationErrs)
+			return
+		}
+		// 일반 에러인 경우 메시지만 반환
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, err.Error(), nil)
+		return
+	}
+
+	// 5. HTML 새니타이제이션 (XSS 방어)
+	input.Content = sanitizer.SanitizeComment(input.Content)
+
+	// 6. 댓글 조회 (비밀번호 포함)
+	comment, err := database.GetCommentByID(h.db, commentID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get comment", nil)
+		return
+	}
+	if comment == nil {
+		respondError(w, http.StatusNotFound, ErrCommentNotFound, "Comment not found", nil)
+		return
+	}
+
+	// 7. 댓글이 속한 포스트 조회 (사이트 격리 확인)
+	post, err := database.GetPostByID(h.db, comment.PostID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get post", nil)
+		return
+	}
+
+	// 8. 사이트 격리 확인
+	if post.SiteID != site.ID {
+		respondError(w, http.StatusForbidden, ErrCommentNotFound, "Comment not found", nil)
+		return
+	}
+
+	// 9. 30분 수정 제한 확인
+	if time.Since(comment.CreatedAt) > EditTimeLimit {
+		respondError(w, http.StatusForbidden, ErrEditTimeExpired, "Comments can only be edited within 30 minutes of creation", nil)
+		return
+	}
+
+	// 10. 비밀번호 확인
+	if err := bcrypt.CompareHashAndPassword([]byte(comment.AuthorPassword), []byte(input.Password)); err != nil {
+		respondError(w, http.StatusForbidden, ErrWrongPassword, "Password does not match", nil)
+		return
+	}
+
+	// 11. IP 주소 및 User-Agent 추출 (수정 시점의 값으로 업데이트)
+	ipAddress := GetIPAddress(r)
+	userAgent := GetUserAgent(r)
+
+	// 12. 댓글 수정
+	if err := database.UpdateComment(h.db, commentID, input.Content, ipAddress, userAgent); err != nil {
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to update comment", nil)
+		return
+	}
+
+	// 13. 수정된 댓글 다시 조회
+	updatedComment, err := database.GetCommentByID(h.db, commentID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get updated comment", nil)
+		return
+	}
+
+	// 14. IP 주소 마스킹
+	updatedComment.IPAddressMasked = models.MaskIPAddress(updatedComment.IPAddress)
+
+	// 15. 200 OK 응답 (비밀번호 해시 제외)
+	response := map[string]interface{}{
+		"id":                updatedComment.ID,
+		"post_id":           updatedComment.PostID,
+		"parent_id":         updatedComment.ParentID,
+		"author_name":       updatedComment.AuthorName,
+		"content":           updatedComment.Content,
+		"ip_address_masked": updatedComment.IPAddressMasked,
+		"is_deleted":        updatedComment.IsDeleted,
+		"created_at":        updatedComment.CreatedAt,
+		"updated_at":        updatedComment.UpdatedAt,
+		"deleted_at":        updatedComment.DeletedAt,
+	}
+
+	respondJSON(w, http.StatusOK, response)
 }
 
 // DeleteComment는 댓글을 삭제합니다 (soft delete)

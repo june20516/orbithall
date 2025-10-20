@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -621,6 +622,306 @@ func TestListComments_DeletedComments(t *testing.T) {
 	}
 
 	// alone은 대댓글이 없으므로 목록에서 완전히 제외됨
+}
+
+// ============================================
+// UpdateComment 테스트
+// ============================================
+
+func TestUpdateComment_Success(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+	defer testhelpers.CleanupSites(t, db)
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "update.test.com", []string{"http://localhost:3000"}, true)
+	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(db, post.ID, nil, "Author", "password123", "Original content", "127.0.0.1", "Original Agent")
+
+	handler := NewCommentHandler(db)
+
+	// 댓글 수정 요청
+	requestBody := map[string]interface{}{
+		"password": "password123",
+		"content":  "Updated content",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+	req.Header.Set("X-Real-IP", "192.168.1.1") // 다른 IP에서 수정
+
+	// Chi URL 파라미터 설정
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: UpdateComment 호출
+	handler.UpdateComment(rec, req)
+
+	// Then: 200 OK
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var response map[string]interface{}
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	// content가 수정되었는지 확인
+	if response["content"] != "Updated content" {
+		t.Errorf("Expected content 'Updated content', got %v", response["content"])
+	}
+
+	// author_name은 수정되지 않음
+	if response["author_name"] != "Author" {
+		t.Errorf("Expected author_name 'Author', got %v", response["author_name"])
+	}
+
+	// updated_at이 변경되었는지 확인
+	if response["updated_at"] == response["created_at"] {
+		t.Error("Expected updated_at to be different from created_at")
+	}
+}
+
+func TestUpdateComment_Fail_WrongPassword(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+	defer testhelpers.CleanupSites(t, db)
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "wrongpass.test.com", []string{"http://localhost:3000"}, true)
+	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(db, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+
+	handler := NewCommentHandler(db)
+
+	// 잘못된 비밀번호로 수정 시도
+	requestBody := map[string]interface{}{
+		"password": "wrongpassword",
+		"content":  "Updated",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: UpdateComment 호출
+	handler.UpdateComment(rec, req)
+
+	// Then: 403 Forbidden
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+
+	var response ErrorResponse
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if response.Error.Code != ErrWrongPassword {
+		t.Errorf("Expected error code %s, got %s", ErrWrongPassword, response.Error.Code)
+	}
+}
+
+func TestUpdateComment_Fail_EditTimeExpired(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+	defer testhelpers.CleanupSites(t, db)
+
+	// Given: 31분 전에 작성된 댓글
+	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "expired.test.com", []string{"http://localhost:3000"}, true)
+	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(db, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+
+	// created_at을 31분 전으로 변경 (직접 DB 조작)
+	_, err := db.Exec(`
+		UPDATE comments
+		SET created_at = NOW() - INTERVAL '31 minutes'
+		WHERE id = $1
+	`, comment.ID)
+	if err != nil {
+		t.Fatalf("Failed to update created_at: %v", err)
+	}
+
+	handler := NewCommentHandler(db)
+
+	requestBody := map[string]interface{}{
+		"password": "password123",
+		"content":  "Updated",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: UpdateComment 호출
+	handler.UpdateComment(rec, req)
+
+	// Then: 403 Forbidden
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+
+	var response ErrorResponse
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if response.Error.Code != ErrEditTimeExpired {
+		t.Errorf("Expected error code %s, got %s", ErrEditTimeExpired, response.Error.Code)
+	}
+}
+
+func TestUpdateComment_Fail_CommentNotFound(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+	defer testhelpers.CleanupSites(t, db)
+
+	// Given: 사이트만 생성
+	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "notfound.test.com", []string{"http://localhost:3000"}, true)
+	site, _ := database.GetSiteByAPIKey(db, apiKey)
+
+	handler := NewCommentHandler(db)
+
+	requestBody := map[string]interface{}{
+		"password": "password123",
+		"content":  "Updated",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/comments/99999", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "99999")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: UpdateComment 호출
+	handler.UpdateComment(rec, req)
+
+	// Then: 404 Not Found
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
+	}
+}
+
+func TestUpdateComment_Fail_ValidationError(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+	defer testhelpers.CleanupSites(t, db)
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "validation.test.com", []string{"http://localhost:3000"}, true)
+	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(db, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+
+	handler := NewCommentHandler(db)
+
+	// 빈 content로 수정 시도
+	requestBody := map[string]interface{}{
+		"password": "password123",
+		"content":  "", // 빈 문자열
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: UpdateComment 호출
+	handler.UpdateComment(rec, req)
+
+	// Then: 400 Bad Request
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+
+	var response ErrorResponse
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if response.Error.Code != ErrInvalidInput {
+		t.Errorf("Expected error code %s, got %s", ErrInvalidInput, response.Error.Code)
+	}
+}
+
+func TestUpdateComment_XSS_HTMLSanitization(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+	defer testhelpers.CleanupSites(t, db)
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "xss-update.test.com", []string{"http://localhost:3000"}, true)
+	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(db, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+
+	handler := NewCommentHandler(db)
+
+	// XSS 공격이 포함된 content로 수정 시도
+	requestBody := map[string]interface{}{
+		"password": "password123",
+		"content":  "<script>alert('XSS')</script>Safe content",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: UpdateComment 호출
+	handler.UpdateComment(rec, req)
+
+	// Then: 200 OK, HTML 태그 제거됨
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var response map[string]interface{}
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	// HTML 태그가 제거되었는지 확인
+	content := response["content"].(string)
+	if content != "Safe content" {
+		t.Errorf("Expected sanitized content 'Safe content', got '%s'", content)
+	}
 }
 
 // ============================================

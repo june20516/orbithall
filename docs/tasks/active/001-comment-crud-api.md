@@ -930,10 +930,10 @@ go get github.com/microcosm-cc/bluemonday
 - [x] `internal/database/comments.go` 생성 (DB 메서드) + Sentinel errors 적용
 - [x] `internal/database/posts.go` 보완 (Post 관련 메서드)
 - [x] `internal/models/comment.go` 보완 (Replies, IPAddressMasked 필드 추가)
-- [ ] `internal/handlers/comments.go` - **CreateComment, ListComments 완료** (TDD)
+- [ ] `internal/handlers/comments.go` - **CreateComment, ListComments, UpdateComment 완료** (TDD)
   - [x] CreateComment 구현 및 테스트 (6개 시나리오 통과)
   - [x] ListComments 구현 및 테스트 (4개 시나리오 통과)
-  - [ ] UpdateComment 구현 (TODO 스텁 상태)
+  - [x] UpdateComment 구현 및 테스트 (6개 시나리오 통과)
   - [ ] DeleteComment 구현 (TODO 스텁 상태)
 - [ ] `cmd/api/main.go` 라우팅 추가
 
@@ -951,7 +951,7 @@ go get github.com/microcosm-cc/bluemonday
 - [ ] 댓글 핸들러 테스트 - Handler 레이어
   - [x] CreateComment 핸들러 테스트 (6개 시나리오 통과)
   - [x] ListComments 핸들러 테스트 (4개 시나리오 통과)
-  - [ ] UpdateComment 핸들러 테스트
+  - [x] UpdateComment 핸들러 테스트 (6개 시나리오 통과)
   - [ ] DeleteComment 핸들러 테스트
 - [x] DB 검증 (해싱, soft delete) - Integration 테스트로 완료
 
@@ -1132,3 +1132,47 @@ go get github.com/microcosm-cc/bluemonday
 - 4개 테스트 모두 통과
 - 전체 handlers 패키지 테스트: 18개 통과 (CreateComment 6개, ListComments 4개, AuthMiddleware 8개)
 - 다음 작업: UpdateComment, DeleteComment 핸들러 구현 (TDD 방식)
+
+### [2025-10-20 저녁] UpdateComment 핸들러 구현 완료 (TDD)
+- UpdateComment 핸들러 구현 (TDD 방식)
+  - **Red 단계**: 6개 테스트 작성
+    - `TestUpdateComment_Success`: 정상 수정 (content, IP, User-Agent 업데이트)
+    - `TestUpdateComment_Fail_WrongPassword`: 비밀번호 불일치 (403)
+    - `TestUpdateComment_Fail_EditTimeExpired`: 30분 수정 제한 초과 (403)
+    - `TestUpdateComment_Fail_CommentNotFound`: 존재하지 않는 댓글 (404)
+    - `TestUpdateComment_Fail_ValidationError`: 입력 검증 실패 (400)
+    - `TestUpdateComment_XSS_HTMLSanitization`: XSS 공격 차단 (HTML 태그 제거)
+  - **Green 단계**: `UpdateComment()` 핸들러 구현
+    - Context에서 사이트 정보 추출
+    - URL 파라미터에서 댓글 ID 추출 (`chi.URLParam`)
+    - JSON 요청 본문 파싱
+    - Validator로 입력 검증 (비밀번호, content)
+    - HTML sanitization (XSS 방어)
+    - 댓글 조회 및 nil 체크
+    - 댓글이 속한 포스트 조회 (사이트 격리 확인)
+    - 사이트 격리 확인 (`post.SiteID != site.ID`)
+    - 30분 수정 제한 확인 (`time.Since(comment.CreatedAt) > EditTimeLimit`)
+    - bcrypt 비밀번호 확인 (`bcrypt.CompareHashAndPassword`)
+    - IP 주소 및 User-Agent 추출 (수정 시점의 값으로 업데이트)
+    - database.UpdateComment 호출
+    - 수정된 댓글 다시 조회 및 IP 마스킹
+    - 200 OK 응답 (비밀번호 해시 제외)
+  - 6개 테스트 모두 통과
+- bcrypt 임포트 추가
+  - `internal/handlers/comments.go`에 `"golang.org/x/crypto/bcrypt"` 추가
+- ParseInt64Param 사용법 수정
+  - Chi URL param 추출 후 문자열을 int64로 변환
+  - `commentIDStr := chi.URLParam(r, "id")`
+  - `commentID, err := ParseInt64Param(commentIDStr)`
+- nil 포인터 에러 수정
+  - GetCommentByID가 `nil, nil` 반환 시 nil 체크 추가
+  - 에러 체크 후 별도로 nil 체크 수행
+- 테스트에서 ID 변환 수정
+  - `string(rune(comment.ID))` → `fmt.Sprintf("%d", comment.ID)`
+  - 정수 ID를 문자열로 올바르게 변환
+- 전체 handlers 패키지 테스트: 24개 통과
+  - CreateComment: 6개
+  - ListComments: 4개
+  - UpdateComment: 6개
+  - AuthMiddleware: 8개
+- 다음 작업: DeleteComment 핸들러 구현 (TDD 방식)
