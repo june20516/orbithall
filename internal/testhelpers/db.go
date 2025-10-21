@@ -1,5 +1,6 @@
-package database
+package testhelpers
 
+/** 의존성 순환참조를 해결하기 위한 중복 코드 */
 import (
 	"context"
 	"database/sql"
@@ -17,7 +18,7 @@ type DBTX interface {
 
 // New는 PostgreSQL 데이터베이스 연결을 생성하고 Connection Pool을 설정합니다
 // databaseURL 형식: postgres://user:password@host:port/dbname?sslmode=disable
-func New(databaseURL string) (*sql.DB, error) {
+func NewDB(databaseURL string) (*sql.DB, error) {
 	// DATABASE_URL 검증
 	if databaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")

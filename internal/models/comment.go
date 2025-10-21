@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"net"
+	"strings"
+	"time"
+)
 
 // Comment는 블로그 포스트에 달린 댓글을 나타냅니다
 type Comment struct {
@@ -36,9 +40,53 @@ type Comment struct {
 	// 스팸 방지 목적으로 저장하며, API 응답에는 포함되지 않습니다
 	UserAgent string `json:"-"`
 
+	// IPAddressMasked는 마스킹된 IP 주소입니다
+	// API 응답에 포함되며, 개인정보 보호를 위해 마지막 옥텟이 가려집니다 (예: 192.168.1.xxx)
+	// 데이터베이스에 저장되지 않고, 런타임에서만 생성됩니다
+	IPAddressMasked string `json:"ip_address_masked,omitempty"`
+
+	// Replies는 이 댓글에 달린 대댓글 목록입니다
+	// 계층적 댓글 구조를 표현하기 위해 사용됩니다
+	// 데이터베이스에 저장되지 않고, 쿼리 결과를 조합하여 생성됩니다
+	Replies []*Comment `json:"replies,omitempty"`
+
 	// 메타데이터
 	ID        int64      `json:"id"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+}
+
+// MaskIPAddress는 IP 주소를 마스킹하여 개인정보를 보호합니다
+// IPv4: 앞 2 옥텟만 표시 (예: 192.168.***.*** )
+// IPv6: 앞 4개 그룹만 표시 (예: 2001:0db8:****:****:****:****:****:****)
+func MaskIPAddress(ip string) string {
+	// 빈 문자열 처리
+	if ip == "" {
+		return ""
+	}
+
+	// IP 파싱
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		// 파싱 실패 시 기본 마스킹 (안전한 폴백)
+		return "***.***.***.***"
+	}
+
+	// IPv4 처리
+	if parsedIP.To4() != nil {
+		parts := strings.Split(ip, ".")
+		if len(parts) == 4 {
+			return parts[0] + "." + parts[1] + ".***.***"
+		}
+		return "***.***.***.***"
+	}
+
+	// IPv6 처리
+	parts := strings.Split(ip, ":")
+	if len(parts) >= 4 {
+		return strings.Join(parts[:4], ":") + ":****:****:****:****"
+	}
+
+	return "****:****:****:****:****:****:****:****"
 }

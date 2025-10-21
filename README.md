@@ -155,6 +155,48 @@ docker-compose logs -f postgres # DB 로그
 docker exec -it orbithall-db psql -U orbithall -d orbithall_db
 ```
 
+## 테스트
+
+### 테스트 실행
+
+테스트는 PostgreSQL 컨테이너만 필요합니다 (API 서버는 불필요).
+
+```bash
+# PostgreSQL 컨테이너만 시작
+docker-compose up -d postgres
+
+# 테스트 실행
+go test ./...
+
+# 특정 패키지 테스트
+go test ./internal/handlers/...
+go test ./internal/database/...
+
+# 상세 출력 (-v)
+go test -v ./...
+
+# 커버리지 확인
+go test -cover ./...
+```
+
+### 테스트 데이터베이스
+
+- **자동 생성**: `docker-compose up` 시 `test_orbithall_db` 자동 생성
+- **자동 마이그레이션**: 테스트 실행 시 최신 스키마 자동 적용 (golang-migrate)
+- **환경변수**: `TEST_DATABASE_URL` (`.env` 파일 또는 환경변수로 설정)
+  ```bash
+  TEST_DATABASE_URL=postgres://orbithall:dev_password@localhost:5432/test_orbithall_db?sslmode=disable
+  ```
+
+### 테스트 전략
+
+- **Transaction-based Testing**: 모든 통합 테스트는 트랜잭션 내에서 실행 후 자동 롤백
+- **격리성**: 각 테스트는 완전히 독립적이며, 데이터 누수 없음
+- **자동 정리**: Cleanup 함수 불필요, `defer cleanup()` 한 줄로 자동 롤백
+
+자세한 내용은 다음 문서를 참고하세요:
+- `docs/adr/002-transaction-based-testing-strategy.md`
+
 ## 다음 단계
 
 - [ ] 데이터베이스 스키마 설계
