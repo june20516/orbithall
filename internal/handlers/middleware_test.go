@@ -17,7 +17,9 @@ import (
 func TestAuthMiddleware_MissingAPIKey(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	_, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// 더미 핸들러 (인증 성공 시 호출됨)
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +28,7 @@ func TestAuthMiddleware_MissingAPIKey(t *testing.T) {
 	})
 
 	// AuthMiddleware 적용
-	handler := AuthMiddleware(db)(nextHandler)
+	handler := AuthMiddleware(tx)(nextHandler)
 
 	// 테스트 요청 생성 (API 키 헤더 없음)
 	req := httptest.NewRequest(http.MethodGet, "/api/comments", nil)
@@ -58,7 +60,9 @@ func TestAuthMiddleware_MissingAPIKey(t *testing.T) {
 func TestAuthMiddleware_InvalidAPIKey(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	_, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// 더미 핸들러
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +71,7 @@ func TestAuthMiddleware_InvalidAPIKey(t *testing.T) {
 	})
 
 	// AuthMiddleware 적용
-	handler := AuthMiddleware(db)(nextHandler)
+	handler := AuthMiddleware(tx)(nextHandler)
 
 	// 테스트 요청 생성 (잘못된 API 키)
 	req := httptest.NewRequest(http.MethodGet, "/api/comments", nil)
@@ -96,10 +100,12 @@ func TestAuthMiddleware_InvalidAPIKey(t *testing.T) {
 func TestAuthMiddleware_InactiveSite(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// 비활성 사이트 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Inactive Site", "inactive.com", []string{"http://localhost:3000"}, false)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Inactive Site", "inactive.com", []string{"http://localhost:3000"}, false).APIKey
 
 	// 더미 핸들러
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +114,7 @@ func TestAuthMiddleware_InactiveSite(t *testing.T) {
 	})
 
 	// AuthMiddleware 적용
-	handler := AuthMiddleware(db)(nextHandler)
+	handler := AuthMiddleware(tx)(nextHandler)
 
 	// 테스트 요청 생성
 	req := httptest.NewRequest(http.MethodGet, "/api/comments", nil)
@@ -137,10 +143,12 @@ func TestAuthMiddleware_InactiveSite(t *testing.T) {
 func TestAuthMiddleware_InvalidOrigin(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// 활성 사이트 생성 (CORS: http://localhost:3000만 허용)
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "test.com", []string{"http://localhost:3000"}, true)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "test.com", []string{"http://localhost:3000"}, true).APIKey
 
 	// 더미 핸들러
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +157,7 @@ func TestAuthMiddleware_InvalidOrigin(t *testing.T) {
 	})
 
 	// AuthMiddleware 적용
-	handler := AuthMiddleware(db)(nextHandler)
+	handler := AuthMiddleware(tx)(nextHandler)
 
 	// 테스트 요청 생성 (허용되지 않은 Origin)
 	req := httptest.NewRequest(http.MethodGet, "/api/comments", nil)
@@ -179,10 +187,12 @@ func TestAuthMiddleware_InvalidOrigin(t *testing.T) {
 func TestAuthMiddleware_ValidAPIKeyAndOrigin(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// 활성 사이트 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "test.com", []string{"http://localhost:3000"}, true)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "test.com", []string{"http://localhost:3000"}, true).APIKey
 
 	// 더미 핸들러 (Context에서 사이트 정보 추출)
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -200,7 +210,7 @@ func TestAuthMiddleware_ValidAPIKeyAndOrigin(t *testing.T) {
 	})
 
 	// AuthMiddleware 적용
-	handler := AuthMiddleware(db)(nextHandler)
+	handler := AuthMiddleware(tx)(nextHandler)
 
 	// 테스트 요청 생성
 	req := httptest.NewRequest(http.MethodGet, "/api/comments", nil)
@@ -220,10 +230,12 @@ func TestAuthMiddleware_ValidAPIKeyAndOrigin(t *testing.T) {
 func TestAuthMiddleware_NoOriginHeader(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// 활성 사이트 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "test.com", []string{"http://localhost:3000"}, true)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "test.com", []string{"http://localhost:3000"}, true).APIKey
 
 	// 더미 핸들러
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +244,7 @@ func TestAuthMiddleware_NoOriginHeader(t *testing.T) {
 	})
 
 	// AuthMiddleware 적용
-	handler := AuthMiddleware(db)(nextHandler)
+	handler := AuthMiddleware(tx)(nextHandler)
 
 	// 테스트 요청 생성 (Origin 헤더 없음 - 서버 간 요청 시뮬레이션)
 	req := httptest.NewRequest(http.MethodGet, "/api/comments", nil)
@@ -252,10 +264,12 @@ func TestAuthMiddleware_NoOriginHeader(t *testing.T) {
 func TestAuthMiddleware_CaseInsensitiveOrigin(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// 활성 사이트 생성 (소문자 CORS)
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "test.com", []string{"http://localhost:3000"}, true)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "test.com", []string{"http://localhost:3000"}, true).APIKey
 
 	// 더미 핸들러
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -264,7 +278,7 @@ func TestAuthMiddleware_CaseInsensitiveOrigin(t *testing.T) {
 	})
 
 	// AuthMiddleware 적용
-	handler := AuthMiddleware(db)(nextHandler)
+	handler := AuthMiddleware(tx)(nextHandler)
 
 	// 테스트 요청 생성 (대문자 Origin)
 	req := httptest.NewRequest(http.MethodGet, "/api/comments", nil)

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"sync"
@@ -29,7 +30,7 @@ const cacheTTL = 1 * time.Minute
 
 // GetSiteByAPIKey는 API 키로 사이트 정보를 조회합니다
 // 캐시에 있고 만료되지 않았으면 캐시에서 반환하고, 없거나 만료되었으면 DB에서 조회합니다
-func GetSiteByAPIKey(db *sql.DB, apiKey string) (*models.Site, error) {
+func GetSiteByAPIKey(ctx context.Context, db DBTX, apiKey string) (*models.Site, error) {
 	// 캐시 조회
 	if cached, ok := siteCache.Load(apiKey); ok {
 		entry := cached.(*cacheEntry)
@@ -42,7 +43,7 @@ func GetSiteByAPIKey(db *sql.DB, apiKey string) (*models.Site, error) {
 	}
 
 	// 캐시 미스: DB에서 조회
-	site, err := getSiteFromDB(db, apiKey)
+	site, err := getSiteFromDB(ctx, db, apiKey)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +58,7 @@ func GetSiteByAPIKey(db *sql.DB, apiKey string) (*models.Site, error) {
 }
 
 // getSiteFromDB는 데이터베이스에서 API 키로 사이트 정보를 조회합니다
-func getSiteFromDB(db *sql.DB, apiKey string) (*models.Site, error) {
+func getSiteFromDB(ctx context.Context, db DBTX, apiKey string) (*models.Site, error) {
 	query := `
 		SELECT id, name, domain, api_key, cors_origins, is_active, created_at, updated_at
 		FROM sites
@@ -67,7 +68,7 @@ func getSiteFromDB(db *sql.DB, apiKey string) (*models.Site, error) {
 	var site models.Site
 	var corsOrigins pq.StringArray
 
-	err := db.QueryRow(query, apiKey).Scan(
+	err := db.QueryRowContext(ctx, query, apiKey).Scan(
 		&site.ID,
 		&site.Name,
 		&site.Domain,

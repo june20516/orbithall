@@ -22,13 +22,15 @@ import (
 func TestCreateComment_Success_TopLevel(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 활성 사이트 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "toplevel.test.com", []string{"http://localhost:3000"}, true)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "toplevel.test.com", []string{"http://localhost:3000"}, true).APIKey
 
 	// 핸들러 생성
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// 테스트 요청 데이터
 	requestBody := map[string]interface{}{
@@ -49,7 +51,7 @@ func TestCreateComment_Success_TopLevel(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	// 미들웨어로 사이트 정보 주입
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
 	req = req.WithContext(withSiteContext(req.Context(), site))
 
 	rec := httptest.NewRecorder()
@@ -100,17 +102,19 @@ func TestCreateComment_Success_TopLevel(t *testing.T) {
 func TestCreateComment_Success_Reply(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트 및 부모 댓글 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "reply.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "reply.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
 
 	// 부모 댓글 생성 (포스트 자동 생성됨)
-	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
-	parentComment, _ := database.CreateComment(db, post.ID, nil, "Parent Author", "password123", "Parent comment", "127.0.0.1", "Test Agent")
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	parentComment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Parent Author", "password123", "Parent comment", "127.0.0.1", "Test Agent")
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// 대댓글 요청
 	requestBody := map[string]interface{}{
@@ -154,17 +158,19 @@ func TestCreateComment_Success_Reply(t *testing.T) {
 func TestCreateComment_Fail_2DepthReply(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트, 부모 댓글, 자식 댓글 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "2depth.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "2depth.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
 
-	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
-	parentComment, _ := database.CreateComment(db, post.ID, nil, "Parent", "pass123", "Parent", "127.0.0.1", "Agent")
-	childComment, _ := database.CreateComment(db, post.ID, &parentComment.ID, "Child", "pass123", "Child", "127.0.0.1", "Agent")
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	parentComment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Parent", "pass123", "Parent", "127.0.0.1", "Agent")
+	childComment, _ := database.CreateComment(ctx, tx, post.ID, &parentComment.ID, "Child", "pass123", "Child", "127.0.0.1", "Agent")
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// 손자 댓글 시도 (2-depth, 금지됨)
 	requestBody := map[string]interface{}{
@@ -205,13 +211,15 @@ func TestCreateComment_Fail_2DepthReply(t *testing.T) {
 func TestCreateComment_Fail_ValidationError(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "validation.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "validation.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// 잘못된 요청 (author_name 없음, password 짧음, content 없음)
 	requestBody := map[string]interface{}{
@@ -256,13 +264,15 @@ func TestCreateComment_Fail_ValidationError(t *testing.T) {
 func TestCreateComment_XSS_HTMLSanitization(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "xss.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "xss.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// XSS 공격 시도
 	requestBody := map[string]interface{}{
@@ -304,13 +314,15 @@ func TestCreateComment_XSS_HTMLSanitization(t *testing.T) {
 func TestCreateComment_Fail_ParentNotFound(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "parent.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "parent.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// 존재하지 않는 부모 댓글 ID
 	requestBody := map[string]interface{}{
@@ -348,22 +360,24 @@ func TestCreateComment_Fail_ParentNotFound(t *testing.T) {
 func TestListComments_Success_TreeStructure(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트, 포스트, 댓글 계층 구조 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "list.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
-	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "list.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
 
 	// 최상위 댓글 2개
-	parent1, _ := database.CreateComment(db, post.ID, nil, "Parent1", "pass123", "첫 번째 댓글", "127.0.0.1", "Agent")
-	_, _ = database.CreateComment(db, post.ID, nil, "Parent2", "pass123", "두 번째 댓글", "127.0.0.1", "Agent")
+	parent1, _ := database.CreateComment(ctx, tx, post.ID, nil, "Parent1", "pass123", "첫 번째 댓글", "127.0.0.1", "Agent")
+	_, _ = database.CreateComment(ctx, tx, post.ID, nil, "Parent2", "pass123", "두 번째 댓글", "127.0.0.1", "Agent")
 
 	// parent1에 대댓글 2개
-	database.CreateComment(db, post.ID, &parent1.ID, "Child1", "pass123", "첫 번째 대댓글", "127.0.0.1", "Agent")
-	database.CreateComment(db, post.ID, &parent1.ID, "Child2", "pass123", "두 번째 대댓글", "127.0.0.1", "Agent")
+	database.CreateComment(ctx, tx, post.ID, &parent1.ID, "Child1", "pass123", "첫 번째 대댓글", "127.0.0.1", "Agent")
+	database.CreateComment(ctx, tx, post.ID, &parent1.ID, "Child2", "pass123", "두 번째 대댓글", "127.0.0.1", "Agent")
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// HTTP 요청 생성
 	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?page=1&limit=50", nil)
@@ -442,18 +456,20 @@ func TestListComments_Success_TreeStructure(t *testing.T) {
 func TestListComments_Success_Pagination(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트, 포스트, 최상위 댓글 3개 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "pagination.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
-	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "pagination.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
 
 	for i := 1; i <= 3; i++ {
-		database.CreateComment(db, post.ID, nil, "Author", "pass123", "댓글 내용", "127.0.0.1", "Agent")
+		database.CreateComment(ctx, tx, post.ID, nil, "Author", "pass123", "댓글 내용", "127.0.0.1", "Agent")
 	}
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// limit=2로 첫 페이지 조회
 	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?page=1&limit=2", nil)
@@ -504,13 +520,15 @@ func TestListComments_Success_Pagination(t *testing.T) {
 func TestListComments_Success_EmptyPost(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트만 생성 (포스트 없음)
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "empty.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "empty.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// 존재하지 않는 포스트 조회
 	req := httptest.NewRequest(http.MethodGet, "/api/posts/nonexistent/comments", nil)
@@ -552,25 +570,27 @@ func TestListComments_Success_EmptyPost(t *testing.T) {
 func TestListComments_DeletedComments(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트, 포스트, 댓글 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "deleted.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
-	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "deleted.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
 
 	// 최상위 댓글 (대댓글 있음)
-	parent, _ := database.CreateComment(db, post.ID, nil, "Parent", "pass123", "부모 댓글", "127.0.0.1", "Agent")
-	database.CreateComment(db, post.ID, &parent.ID, "Child", "pass123", "자식 댓글", "127.0.0.1", "Agent")
+	parent, _ := database.CreateComment(ctx, tx, post.ID, nil, "Parent", "pass123", "부모 댓글", "127.0.0.1", "Agent")
+	database.CreateComment(ctx, tx, post.ID, &parent.ID, "Child", "pass123", "자식 댓글", "127.0.0.1", "Agent")
 
 	// 최상위 댓글 (대댓글 없음)
-	alone, _ := database.CreateComment(db, post.ID, nil, "Alone", "pass123", "혼자 댓글", "127.0.0.1", "Agent")
+	alone, _ := database.CreateComment(ctx, tx, post.ID, nil, "Alone", "pass123", "혼자 댓글", "127.0.0.1", "Agent")
 
 	// 삭제 처리
-	database.DeleteComment(db, parent.ID)
-	database.DeleteComment(db, alone.ID)
+	database.DeleteComment(ctx, tx, parent.ID)
+	database.DeleteComment(ctx, tx, alone.ID)
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments", nil)
 	req.Header.Set("X-Orbithall-API-Key", apiKey)
@@ -592,10 +612,10 @@ func TestListComments_DeletedComments(t *testing.T) {
 
 	var response struct {
 		Comments []struct {
-			ID         int64  `json:"id"`
-			AuthorName string `json:"author_name"`
-			Content    string `json:"content"`
-			IsDeleted  bool   `json:"is_deleted"`
+			ID         int64         `json:"id"`
+			AuthorName string        `json:"author_name"`
+			Content    string        `json:"content"`
+			IsDeleted  bool          `json:"is_deleted"`
 			Replies    []interface{} `json:"replies"`
 		} `json:"comments"`
 	}
@@ -631,15 +651,17 @@ func TestListComments_DeletedComments(t *testing.T) {
 func TestUpdateComment_Success(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트, 포스트, 댓글 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "update.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
-	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
-	comment, _ := database.CreateComment(db, post.ID, nil, "Author", "password123", "Original content", "127.0.0.1", "Original Agent")
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "update.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Original content", "127.0.0.1", "Original Agent")
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// 댓글 수정 요청
 	requestBody := map[string]interface{}{
@@ -691,15 +713,17 @@ func TestUpdateComment_Success(t *testing.T) {
 func TestUpdateComment_Fail_WrongPassword(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트, 포스트, 댓글 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "wrongpass.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
-	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
-	comment, _ := database.CreateComment(db, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "wrongpass.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// 잘못된 비밀번호로 수정 시도
 	requestBody := map[string]interface{}{
@@ -738,16 +762,18 @@ func TestUpdateComment_Fail_WrongPassword(t *testing.T) {
 func TestUpdateComment_Fail_EditTimeExpired(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 31분 전에 작성된 댓글
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "expired.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
-	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
-	comment, _ := database.CreateComment(db, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "expired.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
 
 	// created_at을 31분 전으로 변경 (직접 DB 조작)
-	_, err := db.Exec(`
+	_, err := tx.ExecContext(ctx, `
 		UPDATE comments
 		SET created_at = NOW() - INTERVAL '31 minutes'
 		WHERE id = $1
@@ -756,7 +782,7 @@ func TestUpdateComment_Fail_EditTimeExpired(t *testing.T) {
 		t.Fatalf("Failed to update created_at: %v", err)
 	}
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	requestBody := map[string]interface{}{
 		"password": "password123",
@@ -794,13 +820,15 @@ func TestUpdateComment_Fail_EditTimeExpired(t *testing.T) {
 func TestUpdateComment_Fail_CommentNotFound(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트만 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "notfound.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "notfound.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	requestBody := map[string]interface{}{
 		"password": "password123",
@@ -831,15 +859,17 @@ func TestUpdateComment_Fail_CommentNotFound(t *testing.T) {
 func TestUpdateComment_Fail_ValidationError(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트, 포스트, 댓글 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "validation.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
-	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
-	comment, _ := database.CreateComment(db, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "validation.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// 빈 content로 수정 시도
 	requestBody := map[string]interface{}{
@@ -878,15 +908,17 @@ func TestUpdateComment_Fail_ValidationError(t *testing.T) {
 func TestUpdateComment_XSS_HTMLSanitization(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
-	defer testhelpers.CleanupSites(t, db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
 
 	// Given: 사이트, 포스트, 댓글 생성
-	apiKey := testhelpers.CreateTestSite(t, db, "Test Site", "xss-update.test.com", []string{"http://localhost:3000"}, true)
-	site, _ := database.GetSiteByAPIKey(db, apiKey)
-	post, _ := database.GetOrCreatePost(db, site.ID, "test-post", "Test Post")
-	comment, _ := database.CreateComment(db, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "xss-update.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
 
-	handler := NewCommentHandler(db)
+	handler := NewCommentHandler(tx)
 
 	// XSS 공격이 포함된 content로 수정 시도
 	requestBody := map[string]interface{}{

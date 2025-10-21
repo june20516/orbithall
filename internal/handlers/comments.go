@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -29,12 +28,12 @@ const EditTimeLimit = 30 * time.Minute
 // CommentHandler는 댓글 관련 HTTP 요청을 처리합니다
 // 댓글 생성, 조회, 수정, 삭제 기능을 제공합니다
 type CommentHandler struct {
-	db *sql.DB
+	db database.DBTX
 }
 
 // NewCommentHandler는 CommentHandler의 새 인스턴스를 생성합니다
 // 데이터베이스 연결을 주입받아 의존성을 관리합니다
-func NewCommentHandler(db *sql.DB) *CommentHandler {
+func NewCommentHandler(db database.DBTX) *CommentHandler {
 	return &CommentHandler{
 		db: db,
 	}
@@ -47,9 +46,9 @@ func NewCommentHandler(db *sql.DB) *CommentHandler {
 // filterDeletedCommentsAndMaskIP는 삭제된 댓글을 필터링하고 모든 댓글의 IP를 마스킹합니다
 //
 // 삭제된 댓글의 필터링 규칙 (Soft Delete 방식):
-// - 대댓글이 있는 삭제된 댓글: 계층 구조 유지를 위해 응답에 포함
-//   (author_name과 content는 빈 문자열, isDeleted=true로 클라이언트가 판단)
-// - 대댓글이 없는 삭제된 댓글: 응답 배열에서 완전히 제거
+//   - 대댓글이 있는 삭제된 댓글: 계층 구조 유지를 위해 응답에 포함
+//     (author_name과 content는 빈 문자열, isDeleted=true로 클라이언트가 판단)
+//   - 대댓글이 없는 삭제된 댓글: 응답 배열에서 완전히 제거
 //
 // IP 마스킹: 모든 댓글의 IP 주소를 부분 마스킹 (예: 192.168.***.***)
 func filterDeletedCommentsAndMaskIP(comments []*models.Comment) []*models.Comment {
@@ -96,7 +95,8 @@ func filterDeletedCommentsAndMaskIP(comments []*models.Comment) []*models.Commen
 // POST /api/posts/:slug/comments
 func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// 1. Context에서 사이트 정보 추출 (AuthMiddleware에서 주입됨)
-	site := GetSiteFromContext(r.Context())
+	ctx := r.Context()
+	site := GetSiteFromContext(ctx)
 	if site == nil {
 		respondError(w, http.StatusUnauthorized, ErrMissingAPIKey, "Site not found in context", nil)
 		return
@@ -133,7 +133,7 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	input.AuthorName = sanitizer.SanitizeComment(input.AuthorName)
 
 	// 6. 포스트 가져오기 또는 생성 (slug를 title로도 사용)
-	post, err := database.GetOrCreatePost(h.db, site.ID, slug, slug)
+	post, err := database.GetOrCreatePost(ctx, h.db, site.ID, slug, slug)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get or create post", nil)
 		return
@@ -151,7 +151,7 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	userAgent := GetUserAgent(r)
 
 	// 9. 댓글 생성 (database.CreateComment가 2-depth 검증 및 비밀번호 해싱 처리)
-	comment, err := database.CreateComment(h.db, post.ID, parentID, input.AuthorName, input.Password, input.Content, ipAddress, userAgent)
+	comment, err := database.CreateComment(ctx, h.db, post.ID, parentID, input.AuthorName, input.Password, input.Content, ipAddress, userAgent)
 	if err != nil {
 		// Sentinel errors를 사용한 에러 타입 확인
 		if errors.Is(err, database.ErrNestedReplyNotAllowed) {
@@ -167,7 +167,7 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 10. 댓글 카운트 증가
-	if err := database.IncrementCommentCount(h.db, post.ID); err != nil {
+	if err := database.IncrementCommentCount(ctx, h.db, post.ID); err != nil {
 		// 카운트 증가 실패는 로깅만 하고 계속 진행 (댓글은 이미 생성됨)
 		// TODO: 로깅 추가
 	}
@@ -196,7 +196,8 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 // GET /api/posts/:slug/comments
 func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	// 1. Context에서 사이트 정보 추출
-	site := GetSiteFromContext(r.Context())
+	ctx := r.Context()
+	site := GetSiteFromContext(ctx)
 	if site == nil {
 		respondError(w, http.StatusUnauthorized, ErrMissingAPIKey, "Site not found in context", nil)
 		return
@@ -222,7 +223,7 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. 포스트 조회 (없으면 빈 배열 반환)
-	post, err := database.GetPostBySlug(h.db, site.ID, slug)
+	post, err := database.GetPostBySlug(ctx, h.db, site.ID, slug)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get post", nil)
 		return
@@ -246,7 +247,7 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 
 	// 6. 댓글 목록 조회 (2-level 트리 구조)
-	comments, totalCount, err := database.ListComments(h.db, post.ID, limit, offset)
+	comments, totalCount, err := database.ListComments(ctx, h.db, post.ID, limit, offset)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to list comments", nil)
 		return
@@ -275,7 +276,8 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 // PUT /api/comments/:id
 func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// 1. Context에서 사이트 정보 추출
-	site := GetSiteFromContext(r.Context())
+	ctx := r.Context()
+	site := GetSiteFromContext(ctx)
 	if site == nil {
 		respondError(w, http.StatusUnauthorized, ErrMissingAPIKey, "Site not found in context", nil)
 		return
@@ -312,7 +314,7 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	input.Content = sanitizer.SanitizeComment(input.Content)
 
 	// 6. 댓글 조회 (비밀번호 포함)
-	comment, err := database.GetCommentByID(h.db, commentID)
+	comment, err := database.GetCommentByID(ctx, h.db, commentID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get comment", nil)
 		return
@@ -323,7 +325,7 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 7. 댓글이 속한 포스트 조회 (사이트 격리 확인)
-	post, err := database.GetPostByID(h.db, comment.PostID)
+	post, err := database.GetPostByID(ctx, h.db, comment.PostID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get post", nil)
 		return
@@ -352,13 +354,13 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	userAgent := GetUserAgent(r)
 
 	// 12. 댓글 수정
-	if err := database.UpdateComment(h.db, commentID, input.Content, ipAddress, userAgent); err != nil {
+	if err := database.UpdateComment(ctx, h.db, commentID, input.Content, ipAddress, userAgent); err != nil {
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to update comment", nil)
 		return
 	}
 
 	// 13. 수정된 댓글 다시 조회
-	updatedComment, err := database.GetCommentByID(h.db, commentID)
+	updatedComment, err := database.GetCommentByID(ctx, h.db, commentID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get updated comment", nil)
 		return

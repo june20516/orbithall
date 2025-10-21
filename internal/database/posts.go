@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -9,7 +10,7 @@ import (
 
 // GetPostBySlug는 사이트 ID와 slug로 포스트를 조회합니다
 // site_id와 slug 조합은 유니크하므로 정확히 하나의 포스트를 반환합니다
-func GetPostBySlug(db *sql.DB, siteID int64, slug string) (*models.Post, error) {
+func GetPostBySlug(ctx context.Context, db DBTX, siteID int64, slug string) (*models.Post, error) {
 	query := `
 		SELECT id, site_id, slug, title, comment_count, created_at, updated_at
 		FROM posts
@@ -17,7 +18,7 @@ func GetPostBySlug(db *sql.DB, siteID int64, slug string) (*models.Post, error) 
 	`
 
 	var post models.Post
-	err := db.QueryRow(query, siteID, slug).Scan(
+	err := db.QueryRowContext(ctx, query, siteID, slug).Scan(
 		&post.ID,
 		&post.SiteID,
 		&post.Slug,
@@ -38,7 +39,7 @@ func GetPostBySlug(db *sql.DB, siteID int64, slug string) (*models.Post, error) 
 }
 
 // GetPostByID는 ID로 포스트를 조회합니다
-func GetPostByID(db *sql.DB, id int64) (*models.Post, error) {
+func GetPostByID(ctx context.Context, db DBTX, id int64) (*models.Post, error) {
 	query := `
 		SELECT id, site_id, slug, title, comment_count, created_at, updated_at
 		FROM posts
@@ -46,7 +47,7 @@ func GetPostByID(db *sql.DB, id int64) (*models.Post, error) {
 	`
 
 	var post models.Post
-	err := db.QueryRow(query, id).Scan(
+	err := db.QueryRowContext(ctx, query, id).Scan(
 		&post.ID,
 		&post.SiteID,
 		&post.Slug,
@@ -69,10 +70,10 @@ func GetPostByID(db *sql.DB, id int64) (*models.Post, error) {
 // GetOrCreatePost는 포스트를 조회하고, 없으면 생성합니다
 // Next.js 블로그에는 존재하지만 DB에는 없는 포스트를 처음 댓글 작성 시 자동 생성합니다
 // Race condition 방지를 위해 ON CONFLICT DO NOTHING + 재조회 패턴 사용
-func GetOrCreatePost(db *sql.DB, siteID int64, slug, title string) (*models.Post, error) {
+func GetOrCreatePost(ctx context.Context, db DBTX, siteID int64, slug, title string) (*models.Post, error) {
 	// 1단계: INSERT 시도 (중복 시 무시)
 	// 동시에 여러 요청이 들어와도 unique constraint에 의해 하나만 생성됨
-	_, err := db.Exec(`
+	_, err := db.ExecContext(ctx, `
 		INSERT INTO posts (site_id, slug, title, comment_count)
 		VALUES ($1, $2, $3, 0)
 		ON CONFLICT (site_id, slug) DO NOTHING
@@ -83,7 +84,7 @@ func GetOrCreatePost(db *sql.DB, siteID int64, slug, title string) (*models.Post
 	}
 
 	// 2단계: 반드시 재조회 (INSERT가 성공했든 충돌했든 확실히 존재함)
-	post, err := GetPostBySlug(db, siteID, slug)
+	post, err := GetPostBySlug(ctx, db, siteID, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +98,7 @@ func GetOrCreatePost(db *sql.DB, siteID int64, slug, title string) (*models.Post
 }
 
 // IncrementCommentCount는 포스트의 댓글 수를 1 증가시킵니다
-func IncrementCommentCount(db *sql.DB, postID int64) error {
+func IncrementCommentCount(ctx context.Context, db DBTX, postID int64) error {
 	query := `
 		UPDATE posts
 		SET comment_count = comment_count + 1,
@@ -105,7 +106,7 @@ func IncrementCommentCount(db *sql.DB, postID int64) error {
 		WHERE id = $1
 	`
 
-	result, err := db.Exec(query, postID)
+	result, err := db.ExecContext(ctx, query, postID)
 	if err != nil {
 		return fmt.Errorf("failed to increment comment count: %w", err)
 	}
@@ -124,7 +125,7 @@ func IncrementCommentCount(db *sql.DB, postID int64) error {
 
 // DecrementCommentCount는 포스트의 댓글 수를 1 감소시킵니다
 // 댓글 삭제 시 사용하며, 0 이하로 내려가지 않도록 제한합니다
-func DecrementCommentCount(db *sql.DB, postID int64) error {
+func DecrementCommentCount(ctx context.Context, db DBTX, postID int64) error {
 	query := `
 		UPDATE posts
 		SET comment_count = GREATEST(comment_count - 1, 0),
@@ -132,7 +133,7 @@ func DecrementCommentCount(db *sql.DB, postID int64) error {
 		WHERE id = $1
 	`
 
-	result, err := db.Exec(query, postID)
+	result, err := db.ExecContext(ctx, query, postID)
 	if err != nil {
 		return fmt.Errorf("failed to decrement comment count: %w", err)
 	}

@@ -1,12 +1,13 @@
 package testhelpers
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
 
 	"github.com/joho/godotenv"
-	"github.com/june20516/orbithall/internal/database"
+	"github.com/june20516/orbithall/internal/models"
 	"github.com/lib/pq"
 )
 
@@ -17,17 +18,17 @@ func init() {
 }
 
 // SetupTestDB는 테스트용 데이터베이스 연결을 생성합니다
-// DATABASE_URL 환경변수가 설정되지 않으면 테스트를 스킵합니다
+// TEST_DATABASE_URL 환경변수가 설정되지 않으면 테스트를 스킵합니다
 // 모든 integration test에서 공통으로 사용됩니다
 func SetupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 
-	databaseURL := os.Getenv("DATABASE_URL")
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set, skipping integration test")
+		t.Skip("TEST_DATABASE_URL not set, skipping integration test")
 	}
 
-	db, err := database.New(databaseURL)
+	db, err := NewDB(databaseURL)
 	if err != nil {
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -35,77 +36,67 @@ func SetupTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// CleanupSites는 sites 테이블의 모든 데이터를 삭제합니다
-// CASCADE 옵션으로 관련된 posts, comments도 함께 삭제됩니다
-func CleanupSites(t *testing.T, db *sql.DB) {
+func SetupTxTest(t *testing.T, db *sql.DB) (context.Context, DBTX, func()) {
 	t.Helper()
-	_, err := db.Exec("TRUNCATE sites RESTART IDENTITY CASCADE")
+	tx, err := db.Begin()
 	if err != nil {
-		t.Fatalf("Failed to cleanup sites: %v", err)
+		t.Fatalf("failed to begin transaction: %v", err)
 	}
-}
 
-// CleanupPosts는 posts 테이블의 모든 데이터를 삭제합니다
-// CASCADE 옵션으로 관련된 comments도 함께 삭제됩니다
-func CleanupPosts(t *testing.T, db *sql.DB) {
-	t.Helper()
-	_, err := db.Exec("TRUNCATE posts RESTART IDENTITY CASCADE")
-	if err != nil {
-		t.Fatalf("Failed to cleanup posts: %v", err)
+	// 롤백 함수
+	cleanup := func() {
+		tx.Rollback()
 	}
-}
 
-// CleanupComments는 comments 테이블의 모든 데이터를 삭제합니다
-func CleanupComments(t *testing.T, db *sql.DB) {
-	t.Helper()
-	_, err := db.Exec("TRUNCATE comments RESTART IDENTITY CASCADE")
-	if err != nil {
-		t.Fatalf("Failed to cleanup comments: %v", err)
-	}
+	return context.Background(), tx, cleanup
 }
 
 // CreateTestSite는 테스트용 사이트를 생성하고 API 키를 반환합니다
 // 사이트 생성 후 자동으로 생성된 UUID API 키를 반환합니다
-func CreateTestSite(t *testing.T, db *sql.DB, name string, domain string, corsOrigins []string, isActive bool) string {
+func CreateTestSite(ctx context.Context, t *testing.T, db DBTX, name string, domain string, corsOrigins []string, isActive bool) models.Site {
 	t.Helper()
 
 	query := `
 		INSERT INTO sites (name, domain, cors_origins, is_active)
 		VALUES ($1, $2, $3, $4)
-		RETURNING api_key
+		RETURNING id, name, domain, api_key, cors_origins, is_active, created_at, updated_at
 	`
 
-	var apiKey string
-	err := db.QueryRow(query, name, domain, pq.StringArray(corsOrigins), isActive).Scan(&apiKey)
+	var site models.Site
+	err := db.QueryRowContext(ctx, query, name, domain, pq.StringArray(corsOrigins), isActive).Scan(
+		&site.ID, &site.Name, &site.Domain, &site.APIKey, pq.Array(&site.CORSOrigins), &site.IsActive, &site.CreatedAt, &site.UpdatedAt,
+	)
 	if err != nil {
 		t.Fatalf("Failed to create test site: %v", err)
 	}
 
-	return apiKey
+	return site
 }
 
 // CreateTestPost는 테스트용 포스트를 생성하고 포스트 ID를 반환합니다
-func CreateTestPost(t *testing.T, db *sql.DB, siteID int64, slug string, title string) int64 {
+func CreateTestPost(ctx context.Context, t *testing.T, db DBTX, siteID int64, slug string, title string) models.Post {
 	t.Helper()
 
 	query := `
 		INSERT INTO posts (site_id, slug, title, comment_count)
 		VALUES ($1, $2, $3, 0)
-		RETURNING id
+		RETURNING id, site_id, slug, title, comment_count, created_at, updated_at
 	`
 
-	var postID int64
-	err := db.QueryRow(query, siteID, slug, title).Scan(&postID)
+	var post models.Post
+	err := db.QueryRowContext(ctx, query, siteID, slug, title).Scan(
+		&post.ID, &post.SiteID, &post.Slug, &post.Title, &post.CommentCount, &post.CreatedAt, &post.UpdatedAt,
+	)
 	if err != nil {
 		t.Fatalf("Failed to create test post: %v", err)
 	}
 
-	return postID
+	return post
 }
 
 // CreateTestSiteWithID는 특정 ID로 테스트용 사이트를 생성합니다
 // 외래 키 제약조건 때문에 특정 site_id가 필요한 경우 사용합니다
-func CreateTestSiteWithID(t *testing.T, db *sql.DB, id int64, name string, domain string, corsOrigins []string, isActive bool) {
+func CreateTestSiteWithID(ctx context.Context, t *testing.T, db DBTX, id int64, name string, domain string, corsOrigins []string, isActive bool) {
 	t.Helper()
 
 	query := `
@@ -114,7 +105,7 @@ func CreateTestSiteWithID(t *testing.T, db *sql.DB, id int64, name string, domai
 		ON CONFLICT (id) DO NOTHING
 	`
 
-	_, err := db.Exec(query, id, name, domain, pq.StringArray(corsOrigins), isActive)
+	_, err := db.ExecContext(ctx, query, id, name, domain, pq.StringArray(corsOrigins), isActive)
 	if err != nil {
 		t.Fatalf("Failed to create test site with ID: %v", err)
 	}

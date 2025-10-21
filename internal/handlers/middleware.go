@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -125,7 +124,7 @@ func isOriginAllowed(origin string, allowedOrigins []string) bool {
 // 3. 사이트 활성화 확인
 // 4. CORS Origin 검증
 // 5. Context에 사이트 정보 저장
-func AuthMiddleware(db *sql.DB) func(http.Handler) http.Handler {
+func AuthMiddleware(db database.DBTX) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 1. API 키 추출
@@ -134,9 +133,10 @@ func AuthMiddleware(db *sql.DB) func(http.Handler) http.Handler {
 				respondError(w, http.StatusUnauthorized, ErrMissingAPIKey, "API key is required", nil)
 				return
 			}
+			ctx := r.Context()
 
 			// 2. API 키로 사이트 조회 (캐시 자동 사용)
-			site, err := database.GetSiteByAPIKey(db, apiKey)
+			site, err := database.GetSiteByAPIKey(ctx, db, apiKey)
 			if err != nil {
 				// GetSiteByAPIKey는 is_active=true인 사이트만 조회하므로
 				// 에러가 발생하면 API 키가 잘못되었거나 사이트가 비활성화된 것
@@ -161,7 +161,7 @@ func AuthMiddleware(db *sql.DB) func(http.Handler) http.Handler {
 			}
 
 			// 5. Context에 사이트 정보 저장
-			ctx := context.WithValue(r.Context(), siteContextKey, site)
+			ctx = context.WithValue(ctx, siteContextKey, site)
 
 			// 6. 다음 핸들러 호출
 			next.ServeHTTP(w, r.WithContext(ctx))
