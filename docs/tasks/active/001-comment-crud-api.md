@@ -92,22 +92,25 @@ X-Orbithall-API-Key: {site의 api_key UUID}
 const (
     ErrMissingAPIKey      = "MISSING_API_KEY"       // API 키 헤더 없음
     ErrInvalidAPIKey      = "INVALID_API_KEY"       // API 키 형식 오류 또는 존재하지 않음
-    ErrSiteInactive       = "SITE_INACTIVE"         // 비활성화된 사이트
+    ErrInvalidOrigin      = "INVALID_ORIGIN"        // 허용되지 않은 CORS Origin
     ErrInvalidInput       = "INVALID_INPUT"         // 입력 검증 실패
-    ErrPostNotFound       = "POST_NOT_FOUND"        // 포스트 없음
     ErrCommentNotFound    = "COMMENT_NOT_FOUND"     // 댓글 없음
     ErrWrongPassword      = "WRONG_PASSWORD"        // 비밀번호 불일치
     ErrEditTimeExpired    = "EDIT_TIME_EXPIRED"     // 수정 가능 시간 초과
-    ErrRateLimitExceeded  = "RATE_LIMIT_EXCEEDED"   // Rate limit 초과
+    ErrRateLimitExceeded  = "RATE_LIMIT_EXCEEDED"   // Rate limit 초과 (미구현)
     ErrInternalServer     = "INTERNAL_SERVER_ERROR" // 서버 내부 오류
 )
 ```
+
+**참고**:
+- `POST_NOT_FOUND`는 사용되지 않습니다 (포스트가 없으면 자동 생성)
+- `SITE_INACTIVE`는 사용되지 않습니다 (GetSiteByAPIKey가 비활성 사이트는 반환하지 않음)
 
 ---
 
 ### 1. 댓글 생성
 
-#### `POST /api/posts/:slug/comments`
+#### `POST /api/posts/{slug}/comments`
 
 **요청 헤더**
 ```
@@ -161,20 +164,22 @@ Content-Type: application/json
   }
 }
 
-// 404: 포스트 없음
+// 404: 존재하지 않는 부모 댓글
 {
   "error": {
-    "code": "POST_NOT_FOUND",
-    "message": "Post with slug 'my-post' not found"
+    "code": "COMMENT_NOT_FOUND",
+    "message": "Parent comment not found"
   }
 }
 ```
+
+**참고**: 포스트가 없는 경우 자동으로 생성되므로 POST_NOT_FOUND 에러는 발생하지 않습니다.
 
 ---
 
 ### 2. 댓글 목록 조회
 
-#### `GET /api/posts/:slug/comments`
+#### `GET /api/posts/{slug}/comments`
 
 **요청 헤더**
 ```
@@ -220,8 +225,8 @@ X-Orbithall-API-Key: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       "id": 125,
       "post_id": 456,
       "parent_id": null,
-      "author_name": "[삭제됨]",
-      "content": "삭제된 댓글입니다",
+      "author_name": "",
+      "content": "",
       "ip_address_masked": "10.0.***.***",
       "is_deleted": true,
       "created_at": "2025-10-15T16:00:00Z",
@@ -241,14 +246,15 @@ X-Orbithall-API-Key: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 **삭제된 댓글 처리 규칙**
 - `is_deleted = true`인 댓글:
-  - 대댓글이 있는 경우: 구조 유지, `author_name = "[삭제됨]"`, `content = "삭제된 댓글입니다"`
+  - 대댓글이 있는 경우: 계층 구조 유지를 위해 응답에 포함, `author_name`과 `content`는 빈 문자열, `is_deleted: true`로 클라이언트가 판단
   - 대댓글이 없는 경우: 완전 숨김 (목록에서 제외)
+- 클라이언트 책임: `is_deleted: true`인 댓글은 "[삭제됨]", "삭제된 댓글입니다" 등의 메시지로 표시 (다국어 지원 가능)
 
 ---
 
 ### 3. 댓글 수정
 
-#### `PUT /api/comments/:id`
+#### `PUT /api/comments/{id}`
 
 **요청 헤더**
 ```
@@ -317,7 +323,7 @@ Content-Type: application/json
 
 ### 4. 댓글 삭제
 
-#### `DELETE /api/comments/:id`
+#### `DELETE /api/comments/{id}`
 
 **요청 헤더**
 ```
@@ -672,7 +678,7 @@ curl -X GET "$BASE_URL/api/posts/my-first-post/comments" \
   -H "X-Orbithall-API-Key: $API_KEY"
 
 # 예상 응답: 200 OK
-# - 대댓글이 있는 경우: author_name="[삭제됨]", content="삭제된 댓글입니다"
+# - 대댓글이 있는 경우: author_name="", content="", is_deleted=true (클라이언트가 표시 처리)
 # - 대댓글이 없는 경우: 목록에서 제외
 ```
 
@@ -785,8 +791,9 @@ ab -n 100 -c 10 \
 - 각 댓글의 대댓글은 전체 조회 (깊이 1이므로 성능 문제 없음)
 
 ### 4. 삭제된 댓글 처리
-- **대댓글이 있는 경우**: 구조 유지, `author_name = "[삭제됨]"`, `content = "삭제된 댓글입니다"`
+- **대댓글이 있는 경우**: 계층 구조 유지를 위해 응답에 포함, `author_name`과 `content`는 빈 문자열, `is_deleted: true`로 클라이언트가 판단
 - **대댓글이 없는 경우**: 목록에서 완전히 제외
+- **클라이언트 책임**: `is_deleted: true`인 댓글은 "[삭제됨]", "삭제된 댓글입니다" 등의 메시지로 표시 (다국어 지원 가능)
 
 ### 5. 주의사항
 - **깊이 검증**: 생성 시 부모 댓글의 `parent_id` 확인 필수
@@ -930,12 +937,12 @@ go get github.com/microcosm-cc/bluemonday
 - [x] `internal/database/comments.go` 생성 (DB 메서드) + Sentinel errors 적용
 - [x] `internal/database/posts.go` 보완 (Post 관련 메서드)
 - [x] `internal/models/comment.go` 보완 (Replies, IPAddressMasked 필드 추가)
-- [ ] `internal/handlers/comments.go` - **CreateComment, ListComments, UpdateComment 완료** (TDD)
+- [x] `internal/handlers/comments.go` - **모든 CRUD 핸들러 완료** (TDD)
   - [x] CreateComment 구현 및 테스트 (6개 시나리오 통과)
   - [x] ListComments 구현 및 테스트 (4개 시나리오 통과)
   - [x] UpdateComment 구현 및 테스트 (6개 시나리오 통과)
-  - [ ] DeleteComment 구현 (TODO 스텁 상태)
-- [ ] `cmd/api/main.go` 라우팅 추가
+  - [x] DeleteComment 구현 및 테스트 (5개 시나리오 통과)
+- [x] `cmd/api/main.go` 라우팅 추가
 
 **Note**: Rate Limiting 미들웨어는 이 작업 범위에서 제외하고 별도 작업으로 진행 예정
 
@@ -948,11 +955,11 @@ go get github.com/microcosm-cc/bluemonday
 - [x] 댓글 삭제 테스트 (soft delete) - Database 레이어
 - [x] 대댓글 생성/조회 테스트 (1depth 제한 검증) - Database 레이어
 - [x] 인증 미들웨어 테스트 (API 키 검증, CORS 검증) - Handler 레이어
-- [ ] 댓글 핸들러 테스트 - Handler 레이어
+- [x] 댓글 핸들러 테스트 - Handler 레이어
   - [x] CreateComment 핸들러 테스트 (6개 시나리오 통과)
   - [x] ListComments 핸들러 테스트 (4개 시나리오 통과)
   - [x] UpdateComment 핸들러 테스트 (6개 시나리오 통과)
-  - [ ] DeleteComment 핸들러 테스트
+  - [x] DeleteComment 핸들러 테스트 (5개 시나리오 통과)
 - [x] DB 검증 (해싱, soft delete) - Integration 테스트로 완료
 
 **Note**: Rate Limiting 테스트는 별도 작업으로 진행 예정
@@ -1021,7 +1028,7 @@ go get github.com/microcosm-cc/bluemonday
   - `.claude-project-rules.md`에 작업 관리 방식 섹션 추가
   - `.claude/commands/warmup.md` slash command 생성
 
-### [2025-10-20 오전] API 키 인증 미들웨어 구현 완료
+### [2025-10-20] API 키 인증 미들웨어 구현 완료
 - 공통 테스트 헬퍼 패키지 생성
   - `internal/testhelpers/testhelpers.go` 생성
   - `SetupTestDB()`: 데이터베이스 연결 헬퍼
@@ -1052,7 +1059,7 @@ go get github.com/microcosm-cc/bluemonday
 - 전체 프로젝트 테스트 검증: 모든 패키지 통과
 - Rate Limiting은 별도 작업으로 분리 예정
 
-### [2025-10-20 오후] CreateComment 핸들러 구현 완료 (TDD)
+### [2025-10-20] CreateComment 핸들러 구현 완료 (TDD)
 - HTTP 공통 헬퍼 함수 분리
   - `internal/handlers/helpers.go` 생성
   - `GetIPAddress()`: X-Forwarded-For → X-Real-IP → RemoteAddr 우선순위
@@ -1099,7 +1106,7 @@ go get github.com/microcosm-cc/bluemonday
   - `EditTimeLimit` 상수 정의 (30분)
   - ListComments, UpdateComment, DeleteComment는 TODO 스텁 상태
 
-### [2025-10-20 저녁] ListComments 핸들러 구현 완료 (TDD)
+### [2025-10-20] ListComments 핸들러 구현 완료 (TDD)
 - ListComments 핸들러 구현 (TDD 방식)
   - **Red 단계**: 4개 테스트 작성
     - `TestListComments_Success_TreeStructure`: 계층 구조 조회 (최상위 2개, 대댓글 2개)
@@ -1133,7 +1140,7 @@ go get github.com/microcosm-cc/bluemonday
 - 전체 handlers 패키지 테스트: 18개 통과 (CreateComment 6개, ListComments 4개, AuthMiddleware 8개)
 - 다음 작업: UpdateComment, DeleteComment 핸들러 구현 (TDD 방식)
 
-### [2025-10-20 저녁] UpdateComment 핸들러 구현 완료 (TDD)
+### [2025-10-20] UpdateComment 핸들러 구현 완료 (TDD)
 - UpdateComment 핸들러 구현 (TDD 방식)
   - **Red 단계**: 6개 테스트 작성
     - `TestUpdateComment_Success`: 정상 수정 (content, IP, User-Agent 업데이트)
@@ -1176,3 +1183,50 @@ go get github.com/microcosm-cc/bluemonday
   - UpdateComment: 6개
   - AuthMiddleware: 8개
 - 다음 작업: DeleteComment 핸들러 구현 (TDD 방식)
+
+### [2025-10-20] DeleteComment 핸들러 구현 완료 + 라우팅 설정 (TDD)
+- DeleteComment 핸들러 구현 (TDD 방식)
+  - **Red 단계**: 5개 테스트 작성
+    - `TestDeleteComment_Success`: 정상 삭제 (soft delete, comment_count 감소)
+    - `TestDeleteComment_Fail_WrongPassword`: 비밀번호 불일치 (403)
+    - `TestDeleteComment_Fail_CommentNotFound`: 존재하지 않는 댓글 (404)
+    - `TestDeleteComment_Fail_AlreadyDeleted`: 이미 삭제된 댓글 (404)
+    - `TestDeleteComment_Fail_ValidationError`: 입력 검증 실패 (빈 비밀번호, 400)
+  - **Green 단계**: `DeleteComment()` 핸들러 구현
+    - Context에서 사이트 정보 추출
+    - URL 파라미터에서 댓글 ID 추출
+    - JSON 요청 본문 파싱
+    - Validator로 입력 검증 (비밀번호 필수)
+    - 댓글 조회 및 nil 체크
+    - 이미 삭제된 댓글 확인 (`comment.IsDeleted`)
+    - 댓글이 속한 포스트 조회 (사이트 격리 확인)
+    - 사이트 격리 확인 (`post.SiteID != site.ID`)
+    - bcrypt 비밀번호 확인
+    - database.DeleteComment 호출 (soft delete)
+    - database.DecrementCommentCount 호출
+    - 200 OK 응답
+  - 5개 테스트 모두 통과
+- 테스트 인프라 개선
+  - 각 테스트마다 고유 도메인 사용 (병렬 실행 지원)
+    - `delete-success.test.com`, `delete-wrongpass.test.com` 등
+  - `CreateTestSiteWithParams` 활용으로 테스트 독립성 확보
+  - testhelpers 코드 중복 제거: `CreateTestSite` → `CreateTestSiteWithParams` 호출
+- 전체 handlers 패키지 테스트: 29개 통과
+  - CreateComment: 6개
+  - ListComments: 4개
+  - UpdateComment: 6개
+  - DeleteComment: 5개
+  - AuthMiddleware: 8개
+- 라우팅 설정 (`cmd/api/main.go`)
+  - handlers 패키지 임포트 추가
+  - `commentHandler := handlers.NewCommentHandler(db)` 초기화
+  - AuthMiddleware 적용 (`r.Use(handlers.AuthMiddleware(db))`)
+  - 4개 CRUD 엔드포인트 등록:
+    - `POST /api/posts/{slug}/comments` → CreateComment
+    - `GET /api/posts/{slug}/comments` → ListComments
+    - `PUT /api/comments/{id}` → UpdateComment
+    - `DELETE /api/comments/{id}` → DeleteComment
+  - CORS AllowedHeaders에 `X-Orbithall-API-Key`, `Origin` 추가
+- 빌드 검증: 컴파일 성공 확인
+- **댓글 CRUD API 핸들러 구현 완전히 완료**
+- 다음 작업: 통합 테스트 (curl 명령어로 실제 API 동작 검증)

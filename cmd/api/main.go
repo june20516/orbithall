@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
 	"github.com/june20516/orbithall/internal/database"
+	"github.com/june20516/orbithall/internal/handlers"
 )
 
 func main() {
@@ -47,10 +48,10 @@ func run() error {
 
 	log.Println("Database connected successfully")
 
-	// db 변수는 현재 사용되지 않지만 컴파일 에러 방지를 위해 명시적으로 무시
-	// 향후 댓글 CRUD API 구현 시 핸들러에 전달되어 사용될 예정
-	// 현재는 데이터베이스 연결 및 Connection Pool 설정 검증 목적
-	_ = db
+	// ============================================
+	// 핸들러 초기화
+	// ============================================
+	commentHandler := handlers.NewCommentHandler(db)
 
 	// ============================================
 	// 라우터 설정
@@ -83,7 +84,7 @@ func run() error {
 		// 허용할 HTTP 메서드
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		// 허용할 요청 헤더
-		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
+		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type", "X-Orbithall-API-Key", "Origin"},
 		// 노출할 응답 헤더
 		ExposedHeaders: []string{"Link"},
 		// 쿠키 및 인증 정보 전송 허용
@@ -107,12 +108,14 @@ func run() error {
 
 	// API 라우트 그룹 (/api 접두사)
 	r.Route("/api", func(r chi.Router) {
-		// 댓글 목록 조회 엔드포인트 (임시)
-		r.Get("/comments", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"message":"comments endpoint"}`))
-		})
+		// 인증 미들웨어 적용 (모든 API 요청은 API 키 필요)
+		r.Use(handlers.AuthMiddleware(db))
+
+		// 댓글 CRUD 엔드포인트
+		r.Post("/posts/{slug}/comments", commentHandler.CreateComment)
+		r.Get("/posts/{slug}/comments", commentHandler.ListComments)
+		r.Put("/comments/{id}", commentHandler.UpdateComment)
+		r.Delete("/comments/{id}", commentHandler.DeleteComment)
 	})
 
 	// ============================================
