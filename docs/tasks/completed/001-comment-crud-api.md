@@ -339,18 +339,13 @@ Content-Type: application/json
 ```
 
 **삭제 동작**
-- Soft delete: `is_deleted = true`, `deleted_at = NOW()`
+- Soft delete: `is_deleted = true`, `deleted_at = CLOCK_TIMESTAMP()`
 - `posts.comment_count` 1 감소
 - 대댓글이 있는 경우: 구조 유지 (조회 시 "[삭제됨]" 표시)
 - 대댓글이 없는 경우: 숨김 처리
 
-**성공 응답 (200 OK)**
-```json
-{
-  "message": "Comment deleted successfully",
-  "id": 123
-}
-```
+**성공 응답 (204 No Content)**
+- 응답 본문 없음 (빈 응답)
 
 **실패 응답 예시**
 ```json
@@ -665,11 +660,7 @@ curl -X DELETE "$BASE_URL/api/comments/1" \
     "password": "test1234"
   }'
 
-# 예상 응답: 200 OK
-# {
-#   "message": "Comment deleted successfully",
-#   "id": 1
-# }
+# 예상 응답: 204 No Content (빈 응답)
 ```
 
 #### 시나리오 9: 삭제된 댓글 조회
@@ -969,7 +960,7 @@ go get github.com/microcosm-cc/bluemonday
 - [x] 검증 방법 (curl 명령어)
 - [x] 대댓글 처리 전략
 - [x] 보안 고려사항
-- [ ] 완료 후 문서 업데이트 (실제 소요 시간, 변경된 파일)
+- [x] 완료 후 문서 업데이트 (실제 소요 시간, 변경된 파일)
 
 ---
 
@@ -1230,3 +1221,52 @@ go get github.com/microcosm-cc/bluemonday
 - 빌드 검증: 컴파일 성공 확인
 - **댓글 CRUD API 핸들러 구현 완전히 완료**
 - 다음 작업: 통합 테스트 (curl 명령어로 실제 API 동작 검증)
+
+### [2025-10-21] 테스트 인프라 개선 및 DeleteComment 재구현
+- 테스트 데이터베이스 자동 생성
+  - `docker-compose.yml` 수정: postgres 컨테이너 시작 시 `test_orbithall_db` 자동 생성
+  - 개발자가 `git pull` 후 `docker-compose up`만으로 테스트 실행 가능
+- 테스트 마이그레이션 자동화
+  - golang-migrate 라이브러리 도입 (`github.com/golang-migrate/migrate/v4`)
+  - `internal/testhelpers/testhelpers.go`에 `runMigrations()` 추가
+  - `SetupTestDB()` 호출 시 자동으로 최신 스키마 적용
+  - 프로덕션: CLI 방식 (entrypoint.sh) 유지
+  - 테스트: 라이브러리 방식 (자동화)
+- Transaction-based Testing 도입
+  - 모든 테스트를 트랜잭션 내에서 실행 후 자동 롤백
+  - `internal/testhelpers/testhelpers.go`에 `SetupTxTest()` 추가
+  - Cleanup 함수 불필요, 테스트 격리성 향상
+  - 31개 테스트 모두 트랜잭션 패턴으로 전환
+- PostgreSQL 트랜잭션 동작 이슈 해결
+  - **문제**: `NOW()` 함수는 트랜잭션 시작 시각을 반환하여 같은 트랜잭션 내 모든 INSERT가 동일 timestamp
+  - **해결 1 (정렬)**: `ORDER BY created_at ASC, id ASC`로 변경하여 순서 보장
+    - `internal/database/comments.go:181` - 최상위 댓글 정렬
+    - `internal/database/comments.go:237` - 대댓글 정렬
+  - **해결 2 (타임스탬프)**: UPDATE/DELETE 시 `CLOCK_TIMESTAMP()` 사용
+    - `internal/database/comments.go:112` - UpdateComment
+    - `internal/database/comments.go:140` - DeleteComment
+    - `created_at`은 `NOW()` 유지 (트랜잭션 일관성)
+    - `updated_at`, `deleted_at`은 `CLOCK_TIMESTAMP()` (실제 시각)
+- DeleteComment 핸들러 재구현
+  - **변경**: 응답 형식을 `200 OK + JSON`에서 `204 No Content`로 변경
+  - 기존 테스트 5개 모두 통과 확인
+  - 30분 삭제 제한 적용 (수정과 동일)
+  - 비밀번호 검증, 사이트 격리, soft delete 모두 정상 동작
+- ADR (Architecture Decision Records) 작성
+  - `docs/adr/002-transaction-based-testing-strategy.md` 생성
+    - Transaction rollback 방식 채택 이유
+    - NOW() 동작과 대응책 문서화
+  - `docs/adr/003-database-sql-over-orm.md` 생성
+    - Raw SQL 선택 이유 (명시성, 성능, 제어)
+    - 향후 sqlc 도입 고려 가능성
+  - `docs/adr/004-comment-sorting-strategy.md` 생성
+    - `ORDER BY created_at ASC, id ASC` 복합 정렬 채택 이유
+    - 트랜잭션 내 순서 보장 전략
+  - `docs/adr/005-timestamp-function-strategy.md` 생성
+    - NOW() vs CLOCK_TIMESTAMP() 사용 원칙
+    - 필드별 타임스탬프 함수 선택 기준
+- API Spec 수정
+  - DeleteComment 응답: `200 OK + JSON` → `204 No Content` (빈 응답)
+  - 삭제 동작: `deleted_at = NOW()` → `deleted_at = CLOCK_TIMESTAMP()`
+  - 검증 시나리오 8번 업데이트
+- 전체 테스트 통과: 31개 (모두 트랜잭션 기반)
