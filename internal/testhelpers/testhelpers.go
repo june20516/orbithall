@@ -6,6 +6,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/joho/godotenv"
 	"github.com/june20516/orbithall/internal/models"
 	"github.com/lib/pq"
@@ -17,7 +20,7 @@ func init() {
 	_ = godotenv.Load("../../.env")
 }
 
-// SetupTestDB는 테스트용 데이터베이스 연결을 생성합니다
+// SetupTestDB는 테스트용 데이터베이스 연결을 생성하고 마이그레이션을 실행합니다
 // TEST_DATABASE_URL 환경변수가 설정되지 않으면 테스트를 스킵합니다
 // 모든 integration test에서 공통으로 사용됩니다
 func SetupTestDB(t *testing.T) *sql.DB {
@@ -33,7 +36,34 @@ func SetupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
 
+	// 마이그레이션 자동 실행
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("Failed to run migrations: %v", err)
+	}
+
 	return db
+}
+
+// runMigrations는 golang-migrate를 사용하여 테스트 DB에 마이그레이션을 실행합니다
+func runMigrations(db *sql.DB) error {
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		return err
+	}
+
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://../../migrations",
+		"postgres", driver)
+	if err != nil {
+		return err
+	}
+
+	// 마이그레이션 실행 (이미 최신 상태면 에러 무시)
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return err
+	}
+
+	return nil
 }
 
 func SetupTxTest(t *testing.T, db *sql.DB) (context.Context, DBTX, func()) {

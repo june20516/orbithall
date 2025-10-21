@@ -957,6 +957,243 @@ func TestUpdateComment_XSS_HTMLSanitization(t *testing.T) {
 }
 
 // ============================================
+// DeleteComment 테스트
+// ============================================
+
+func TestDeleteComment_Success(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "delete.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Original content", "127.0.0.1", "Agent")
+
+	handler := NewCommentHandler(tx)
+
+	// 댓글 삭제 요청
+	requestBody := map[string]interface{}{
+		"password": "password123",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	// Chi URL 파라미터 설정
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: DeleteComment 호출
+	handler.DeleteComment(rec, req)
+
+	// Then: 204 No Content
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusNoContent, rec.Code, rec.Body.String())
+	}
+
+	// 삭제된 댓글 확인
+	deletedComment, _ := database.GetCommentByID(ctx, tx, comment.ID)
+	if !deletedComment.IsDeleted {
+		t.Error("Expected comment to be deleted")
+	}
+	if deletedComment.DeletedAt == nil {
+		t.Error("Expected deleted_at to be set")
+	}
+}
+
+func TestDeleteComment_Fail_WrongPassword(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "delete.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+
+	handler := NewCommentHandler(tx)
+
+	// 잘못된 비밀번호로 삭제 요청
+	requestBody := map[string]interface{}{
+		"password": "wrongpassword",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: DeleteComment 호출
+	handler.DeleteComment(rec, req)
+
+	// Then: 403 Forbidden
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+
+	// 댓글이 삭제되지 않았는지 확인
+	notDeletedComment, _ := database.GetCommentByID(ctx, tx, comment.ID)
+	if notDeletedComment.IsDeleted {
+		t.Error("Expected comment to not be deleted")
+	}
+}
+
+func TestDeleteComment_Fail_DeleteTimeExpired(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 31분 전에 생성된 댓글
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "delete.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+
+	// created_at을 31분 전으로 변경 (직접 DB 조작)
+	_, err := tx.ExecContext(ctx, `
+		UPDATE comments
+		SET created_at = NOW() - INTERVAL '31 minutes'
+		WHERE id = $1
+	`, comment.ID)
+	if err != nil {
+		t.Fatalf("Failed to update created_at: %v", err)
+	}
+
+	handler := NewCommentHandler(tx)
+
+	requestBody := map[string]interface{}{
+		"password": "password123",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: DeleteComment 호출
+	handler.DeleteComment(rec, req)
+
+	// Then: 403 Forbidden
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+
+	var response ErrorResponse
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if response.Error.Code != ErrEditTimeExpired {
+		t.Errorf("Expected error code %s, got %s", ErrEditTimeExpired, response.Error.Code)
+	}
+}
+
+func TestDeleteComment_Fail_CommentNotFound(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트만 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "delete.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+
+	handler := NewCommentHandler(tx)
+
+	requestBody := map[string]interface{}{
+		"password": "password123",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	// 존재하지 않는 댓글 ID
+	req := httptest.NewRequest(http.MethodDelete, "/api/comments/99999", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "99999")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: DeleteComment 호출
+	handler.DeleteComment(rec, req)
+
+	// Then: 404 Not Found
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
+	}
+}
+
+func TestDeleteComment_Fail_MissingPassword(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "delete.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+
+	handler := NewCommentHandler(tx)
+
+	// 비밀번호 없이 삭제 요청
+	requestBody := map[string]interface{}{}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: DeleteComment 호출
+	handler.DeleteComment(rec, req)
+
+	// Then: 400 Bad Request
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// ============================================
 // 테스트 헬퍼
 // ============================================
 

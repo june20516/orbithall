@@ -389,6 +389,79 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 // DeleteComment는 댓글을 삭제합니다 (soft delete)
 // DELETE /api/comments/:id
 func (h *CommentHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
-	// TODO: 구현 예정
-	respondJSON(w, http.StatusOK, map[string]string{"message": "DeleteComment - TODO"})
+	// 1. Context에서 사이트 정보 추출
+	ctx := r.Context()
+	site := GetSiteFromContext(ctx)
+	if site == nil {
+		respondError(w, http.StatusUnauthorized, ErrMissingAPIKey, "Site not found in context", nil)
+		return
+	}
+
+	// 2. URL 파라미터에서 댓글 ID 추출
+	commentIDStr := chi.URLParam(r, "id")
+	commentID, err := ParseInt64Param(commentIDStr)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid comment ID", nil)
+		return
+	}
+
+	// 3. 요청 본문 파싱 (비밀번호 확인용)
+	var input struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid request body", nil)
+		return
+	}
+
+	// 4. 비밀번호 검증
+	if input.Password == "" {
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Password is required", nil)
+		return
+	}
+
+	// 5. 댓글 조회 (비밀번호 포함)
+	comment, err := database.GetCommentByID(ctx, h.db, commentID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get comment", nil)
+		return
+	}
+	if comment == nil {
+		respondError(w, http.StatusNotFound, ErrCommentNotFound, "Comment not found", nil)
+		return
+	}
+
+	// 6. 댓글이 속한 포스트 조회 (사이트 격리 확인)
+	post, err := database.GetPostByID(ctx, h.db, comment.PostID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get post", nil)
+		return
+	}
+
+	// 7. 사이트 격리 확인
+	if post.SiteID != site.ID {
+		respondError(w, http.StatusForbidden, ErrCommentNotFound, "Comment not found", nil)
+		return
+	}
+
+	// 8. 30분 삭제 제한 확인
+	if time.Since(comment.CreatedAt) > EditTimeLimit {
+		respondError(w, http.StatusForbidden, ErrEditTimeExpired, "Comments can only be deleted within 30 minutes of creation", nil)
+		return
+	}
+
+	// 9. 비밀번호 확인
+	if err := bcrypt.CompareHashAndPassword([]byte(comment.AuthorPassword), []byte(input.Password)); err != nil {
+		respondError(w, http.StatusForbidden, ErrWrongPassword, "Password does not match", nil)
+		return
+	}
+
+	// 10. 댓글 삭제 (soft delete)
+	if err := database.DeleteComment(ctx, h.db, commentID); err != nil {
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to delete comment", nil)
+		return
+	}
+
+	// 11. 204 No Content 응답
+	w.WriteHeader(http.StatusNoContent)
 }

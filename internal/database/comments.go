@@ -109,7 +109,7 @@ func UpdateComment(ctx context.Context, db DBTX, commentID int64, content, ipAdd
 		SET content = $1,
 			ip_address = $2,
 			user_agent = $3,
-			updated_at = NOW()
+			updated_at = CLOCK_TIMESTAMP()
 		WHERE id = $4 AND is_deleted = FALSE
 	`
 
@@ -137,7 +137,7 @@ func DeleteComment(ctx context.Context, db DBTX, commentID int64) error {
 	query := `
 		UPDATE comments
 		SET is_deleted = TRUE,
-			deleted_at = NOW()
+			deleted_at = CLOCK_TIMESTAMP()
 		WHERE id = $1 AND is_deleted = FALSE
 	`
 
@@ -178,7 +178,7 @@ func ListComments(ctx context.Context, db DBTX, postID int64, limit, offset int)
 		SELECT id, post_id, parent_id, author_name, author_password, content, ip_address, user_agent, is_deleted, created_at, updated_at, deleted_at
 		FROM comments
 		WHERE post_id = $1 AND parent_id IS NULL
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 		LIMIT $2 OFFSET $3
 	`
 
@@ -228,13 +228,13 @@ func ListComments(ctx context.Context, db DBTX, postID int64, limit, offset int)
 }
 
 // getReplies는 특정 댓글의 대댓글 목록을 조회합니다 (비공개 헬퍼 함수)
-// created_at ASC 순으로 정렬됩니다
+// created_at ASC, id ASC 순으로 정렬됩니다
 func getReplies(ctx context.Context, db DBTX, parentID int64) ([]*models.Comment, error) {
 	query := `
 		SELECT id, post_id, parent_id, author_name, author_password, content, ip_address, user_agent, is_deleted, created_at, updated_at, deleted_at
 		FROM comments
 		WHERE parent_id = $1
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 	`
 
 	rows, err := db.QueryContext(ctx, query, parentID)
