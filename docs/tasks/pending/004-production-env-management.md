@@ -77,7 +77,7 @@ orbithall/
 ### 4. 문서 작성
 - README에 환경변수 섹션 업데이트
 - 배포 가이드 작성
-- Railway 설정 가이드
+- Render 설정 가이드
 
 ### 5. 기존 코드 리팩토링
 - main.go에서 직접 os.Getenv() 제거
@@ -99,21 +99,22 @@ orbithall/
    - 8080 포트로 시작 확인
 
 4. **프로덕션 설정**
-   - Railway 환경변수 설정
+   - Render 환경변수 설정
    - 정상 배포 확인
 
 ## 의존성
-- 선행 작업: Railway 배포 설정
-- 후속 작업: 없음 (로드맵 완료)
+- 선행 작업: ✅ 프로덕션 배포 완료 (003-deployment)
+- 후속 작업: 없음
 
 ## 예상 소요 시간
 - 예상: 1-2시간
 
 ## 주의사항
 - .env 파일은 .gitignore에 포함 (이미 되어 있음)
-- Railway는 .env 파일 불필요 (UI에서 설정)
+- Render는 .env 파일 불필요 (UI에서 설정)
 - 환경변수 로그 출력 시 마스킹 필요
 - 기본값은 개발 환경 기준
+- CORS는 동적 검증 방식 사용 (CORS_ORIGIN 환경변수 불필요)
 
 ## 참고 자료
 - Go 환경변수: https://pkg.go.dev/os#Getenv

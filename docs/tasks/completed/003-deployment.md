@@ -1,4 +1,4 @@
-# [WIP] Render + Supabase 배포
+# ✅ Render + Supabase 배포
 
 ## 작성일
 2025-10-22
@@ -39,25 +39,25 @@
 ## 체크리스트
 
 ### 수동 작업 (사용자)
-- [ ] Supabase 계정 생성 및 로그인
-- [ ] Supabase 프로젝트 생성 (Region: Seoul, Plan: Free)
-- [ ] DATABASE_URL 복사 및 저장
-- [ ] Render 계정 생성 및 GitHub 연동
-- [ ] Render Web Service 생성 (저장소: june20516/orbithall, Branch: main)
-- [ ] Render 환경변수 설정 (DATABASE_URL, ENV)
+- [x] Supabase 계정 생성 및 로그인
+- [x] Supabase 프로젝트 생성 (Region: Seoul, Plan: Free)
+- [x] DATABASE_URL 복사 및 저장
+- [x] Render 계정 생성 및 GitHub 연동
+- [x] Render Web Service 생성 (저장소: june20516/orbithall, Branch: main)
+- [x] Render 환경변수 설정 (DATABASE_URL, ENV)
 
 ### 코드 작업
-- [ ] 로컬 .env 파일에 Supabase DATABASE_URL 설정
-- [ ] Supabase에 마이그레이션 실행
-- [ ] Supabase에 테스트 사이트 등록 (SQL)
-- [ ] Render 배포 로그 확인 (마이그레이션 성공 여부)
-- [ ] API 헬스체크 테스트
-- [ ] 댓글 CRUD API 테스트
+- [x] 로컬 .env 파일에 Supabase DATABASE_URL 설정
+- [x] Supabase에 마이그레이션 실행
+- [x] Supabase에 테스트 사이트 등록 (SQL)
+- [x] Render 배포 로그 확인 (마이그레이션 성공 여부)
+- [x] API 헬스체크 테스트
+- [x] 댓글 CRUD API 테스트
 
 ### 문서화
-- [ ] Supabase 프로젝트 URL 기록
-- [ ] Render 서비스 URL 기록
-- [ ] 테스트 API 키 기록
+- [x] Supabase 프로젝트 URL 기록
+- [x] Render 서비스 URL 기록
+- [x] 테스트 API 키 기록
 
 ## 구현 단계
 
@@ -148,6 +148,11 @@ VALUES (
 - **DATABASE_URL**: `postgresql://postgres.dinwpsvokpkbdfwqvjhz:[PASSWORD]@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres`
 - **Connection Type**: Session Pooler (IPv4 호환)
 
+### Render
+- **서비스 URL**: https://orbithall.onrender.com
+- **Region**: Singapore
+- **Auto-Deploy**: main 브랜치 푸시 시 자동 배포
+
 ### 사이트 정보
 - **Name**: Bran's codeverse
 - **Domain**: june20516.github.io
@@ -160,15 +165,22 @@ VALUES (
 - ✅ 001_initial_schema: sites, posts, comments 테이블 생성
 - ✅ 002_change_api_key_to_varchar: api_key UUID → VARCHAR(100) 변경
 
+### API 검증
+- ✅ Health Check: `GET /health`
+- ✅ 댓글 생성: `POST /api/posts/:slug/comments`
+- ✅ 댓글 조회: `GET /api/posts/:slug/comments`
+
 ---
 
 ## 작업 이력
 
-### [2025-10-22] Supabase 배포 완료
-- Session Pooler 사용 (IPv4 호환)
-- api_key 타입 변경 (UUID → VARCHAR)
+### [2025-10-22] 배포 완료 ✅
+- Supabase 프로젝트 생성 (Session Pooler)
+- api_key 타입 변경 마이그레이션 (UUID → VARCHAR)
 - Prefixed API key 적용 (orb_live_)
-- 프로덕션 사이트 등록 완료
+- Render Web Service 배포 및 환경변수 설정
+- Connection Pool 설정 조정 (MaxOpenConns: 10)
+- API 테스트 완료 (Health Check, 댓글 생성/조회)
 
 ### [2025-10-22] CORS 전략 반영 및 문서 간소화
 - 동적 CORS 적용 (사이트별 검증)

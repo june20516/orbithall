@@ -10,9 +10,9 @@ Orbithall은 Next.js SSG 블로그를 위한 독립형 댓글 시스템입니다
 
 - **Backend**: Go 1.25
 - **Framework**: Chi (HTTP 라우터)
-- **Database**: PostgreSQL 16
+- **Database**: PostgreSQL 16 (Supabase)
 - **Infrastructure**: Docker + Docker Compose
-- **Deploy Target**: Railway
+- **Deployment**: Render (API) + Supabase (Database)
 
 ## 프로젝트 구조
 
@@ -84,15 +84,37 @@ GET /health
 }
 ```
 
-### 댓글 목록 (임시)
+### 댓글 생성
 ```
-GET /api/comments
+POST /api/posts/:slug/comments
+Headers: X-Orbithall-API-Key
+```
+
+요청 예시:
+```json
+{
+  "author_name": "작성자",
+  "password": "1234",
+  "content": "댓글 내용"
+}
+```
+
+### 댓글 조회
+```
+GET /api/posts/:slug/comments
+Headers: X-Orbithall-API-Key
 ```
 
 응답 예시:
 ```json
 {
-  "message": "comments endpoint"
+  "comments": [...],
+  "pagination": {
+    "current_page": 1,
+    "total_pages": 1,
+    "total_comments": 10,
+    "per_page": 50
+  }
 }
 ```
 
@@ -198,13 +220,22 @@ go test -cover ./...
 자세한 내용은 다음 문서를 참고하세요:
 - `docs/adr/002-transaction-based-testing-strategy.md`
 
+## 배포 정보
+
+### 프로덕션 환경
+- **API URL**: https://orbithall.onrender.com
+- **Database**: Supabase (Seoul Region)
+- **Auto-Deploy**: main 브랜치 푸시 시 자동 배포
+
+자세한 배포 가이드는 `docs/tasks/completed/003-deployment.md`를 참고하세요.
+
 ## 다음 단계
 
-- [ ] 데이터베이스 스키마 설계
-- [ ] 댓글 CRUD API 구현
-- [ ] 기본 보안 구현 (Rate Limiting, Input Validation)
-- [ ] Railway 배포 설정
-- [ ] 프로덕션 환경변수 관리
+- [x] 데이터베이스 스키마 설계
+- [x] 댓글 CRUD API 구현
+- [x] 프로덕션 배포 (Render + Supabase)
+- [ ] Rate Limiting 구현
+- [ ] 블로그 프론트엔드 연동
 
 ## 라이선스
 
