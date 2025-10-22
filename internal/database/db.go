@@ -31,10 +31,10 @@ func New(databaseURL string) (*sql.DB, error) {
 	}
 
 	// Connection Pool 설정
-	// 동시에 열 수 있는 최대 연결 수
-	db.SetMaxOpenConns(100)
-	// 유휴 상태로 유지할 최대 연결 수
-	db.SetMaxIdleConns(100)
+	// Supabase Session Pooler는 최대 15개 연결 제한
+	// 로컬 개발은 더 높은 값 사용 가능
+	db.SetMaxOpenConns(10)  // 안전한 기본값 (Session Pooler 15개 제한 고려)
+	db.SetMaxIdleConns(5)   // 유휴 연결은 적게 유지
 	// 연결의 최대 수명 (5분 후 자동 닫힘)
 	db.SetConnMaxLifetime(5 * time.Minute)
 	// 유휴 연결의 최대 유지 시간 (5분 후 자동 닫힘)

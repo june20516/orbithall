@@ -71,16 +71,12 @@ func run() error {
 	// ============================================
 	// CORS(Cross-Origin Resource Sharing) 설정
 	// ============================================
-	// 다른 도메인(Next.js 블로그)에서 이 API를 호출할 수 있도록 허용
-	corsOrigin := os.Getenv("CORS_ORIGIN")
-	if corsOrigin == "" {
-		// 환경변수가 없으면 기본값 사용
-		corsOrigin = "http://localhost:3000"
-	}
-
+	// CORS는 사이트별 동적 검증을 사용합니다 (AuthMiddleware에서 처리)
+	// 멀티 테넌시 환경이므로 글로벌 CORS 설정은 사용하지 않습니다
+	// 각 사이트의 cors_origins 배열로 검증됩니다
 	r.Use(cors.Handler(cors.Options{
-		// 허용할 도메인 목록
-		AllowedOrigins: []string{corsOrigin},
+		// 모든 origin 허용 (실제 검증은 AuthMiddleware에서 수행)
+		AllowedOrigins: []string{"*"},
 		// 허용할 HTTP 메서드
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		// 허용할 요청 헤더
@@ -88,7 +84,7 @@ func run() error {
 		// 노출할 응답 헤더
 		ExposedHeaders: []string{"Link"},
 		// 쿠키 및 인증 정보 전송 허용
-		AllowCredentials: true,
+		AllowCredentials: false, // "*" origin 사용 시 false 필수
 		// preflight 요청 캐시 시간 (초)
 		MaxAge: 300,
 	}))
