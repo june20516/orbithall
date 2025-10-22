@@ -47,8 +47,7 @@ services:
     environment:
       # PostgreSQL 연결 문자열 (postgres 서비스명으로 접근)
       DATABASE_URL: postgres://orbithall:dev_password@postgres:5432/orbithall_db?sslmode=disable
-      # CORS 허용 도메인 (Next.js 블로그 주소)
-      CORS_ORIGIN: http://localhost:3000
+      # 환경 (development/production)
       ENV: development
     # postgres 서비스가 healthy 상태가 될 때까지 대기
     depends_on:

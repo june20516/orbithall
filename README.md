@@ -102,8 +102,9 @@ GET /api/comments
 |--------|------|--------|
 | `PORT` | API 서버 포트 | `8080` |
 | `DATABASE_URL` | PostgreSQL 연결 문자열 | docker-compose에서 자동 설정 |
-| `CORS_ORIGIN` | CORS 허용 도메인 | `http://localhost:3000` |
 | `ENV` | 환경 (development/production) | `development` |
+
+**참고**: CORS는 사이트별 동적 검증 방식을 사용합니다. 각 사이트의 `cors_origins` 배열로 관리됩니다.
 
 ## 블로그와 연동
 
