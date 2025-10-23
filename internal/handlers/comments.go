@@ -56,8 +56,17 @@ func filterDeletedCommentsAndMaskIP(comments []*models.Comment) []*models.Commen
 
 	for _, comment := range comments {
 		if comment.IsDeleted {
-			// 삭제된 댓글에 대댓글이 있으면 계층 구조 유지를 위해 포함
-			if len(comment.Replies) > 0 {
+			// 대댓글 중 삭제되지 않은 것이 있는지 확인
+			hasActiveReplies := false
+			for _, reply := range comment.Replies {
+				if !reply.IsDeleted {
+					hasActiveReplies = true
+					break
+				}
+			}
+
+			// 삭제된 댓글에 활성 대댓글이 있으면 계층 구조 유지를 위해 포함
+			if hasActiveReplies {
 				// 삭제된 댓글의 내용은 비움 (클라이언트가 isDeleted 플래그로 판단)
 				comment.AuthorName = ""
 				comment.Content = ""
@@ -70,7 +79,7 @@ func filterDeletedCommentsAndMaskIP(comments []*models.Comment) []*models.Commen
 
 				filtered = append(filtered, comment)
 			}
-			// 대댓글이 없는 삭제된 댓글은 배열에서 완전히 제거
+			// 활성 대댓글이 없는 삭제된 댓글은 배열에서 완전히 제거
 		} else {
 			// 삭제되지 않은 댓글: IP 마스킹만 수행
 			comment.IPAddressMasked = models.MaskIPAddress(comment.IPAddress)
@@ -426,7 +435,7 @@ func (h *CommentHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get comment", nil)
 		return
 	}
-	if comment == nil {
+	if comment == nil || comment.IsDeleted {
 		respondError(w, http.StatusNotFound, ErrCommentNotFound, "Comment not found", nil)
 		return
 	}

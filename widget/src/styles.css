@@ -1,0 +1,493 @@
+/* OrbitHall Widget Styles */
+/* CSS 변수를 통한 커스터마이징 지원 */
+
+:root {
+  /* 색상 */
+  --orb-primary-color: #3b82f6;
+  --orb-text-color: #1f2937;
+  --orb-text-secondary: #6b7280;
+  --orb-border-color: #e5e7eb;
+  --orb-background: #ffffff;
+  --orb-background-secondary: #f9fafb;
+  --orb-error-color: #ef4444;
+
+  /* 간격 */
+  --orb-spacing-xs: 0.25rem;
+  --orb-spacing-sm: 0.5rem;
+  --orb-spacing-md: 1rem;
+  --orb-spacing-lg: 1.5rem;
+
+  /* 폰트 */
+  --orb-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --orb-font-size-sm: 0.875rem;
+  --orb-font-size-base: 1rem;
+  --orb-font-size-lg: 1.125rem;
+
+  /* 테두리 */
+  --orb-border-radius: 0.5rem;
+  --orb-border-width: 1px;
+}
+
+/* 위젯 컨테이너 */
+.orb-widget {
+  font-family: var(--orb-font-family);
+  font-size: var(--orb-font-size-base);
+  color: var(--orb-text-color);
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+/* 헤더 */
+.orb-header {
+  margin-bottom: var(--orb-spacing-lg);
+}
+
+.orb-header h3 {
+  margin: 0;
+  font-size: var(--orb-font-size-lg);
+  font-weight: 600;
+}
+
+/* 폼 스타일 */
+.orb-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--orb-spacing-sm);
+  margin-bottom: var(--orb-spacing-lg);
+  padding: var(--orb-spacing-md);
+  background: var(--orb-background-secondary);
+  border-radius: var(--orb-border-radius);
+}
+
+.orb-form-error {
+  padding: var(--orb-spacing-sm) var(--orb-spacing-md);
+  margin-bottom: var(--orb-spacing-md);
+  background: #fee;
+  color: var(--orb-error-color);
+  border-radius: var(--orb-border-radius);
+  font-size: var(--orb-font-size-sm);
+}
+
+.orb-form-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--orb-spacing-sm);
+  margin-bottom: var(--orb-spacing-sm);
+}
+
+.orb-input,
+.orb-textarea {
+  width: 100%;
+  padding: var(--orb-spacing-sm) var(--orb-spacing-md);
+  border: var(--orb-border-width) solid var(--orb-border-color);
+  border-radius: var(--orb-border-radius);
+  font-family: var(--orb-font-family);
+  font-size: var(--orb-font-size-base);
+  background: var(--orb-background);
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.orb-input:focus,
+.orb-textarea:focus {
+  outline: none;
+  border-color: var(--orb-primary-color);
+}
+
+.orb-input:disabled,
+.orb-textarea:disabled {
+  background: var(--orb-background-secondary);
+  cursor: not-allowed;
+}
+
+.orb-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.orb-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--orb-spacing-sm);
+}
+
+.orb-form-password {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* 로딩 및 에러 상태 */
+.orb-loading,
+.orb-error,
+.orb-empty {
+  padding: var(--orb-spacing-lg);
+  text-align: center;
+  color: var(--orb-text-secondary);
+  font-size: var(--orb-font-size-sm);
+}
+
+.orb-error {
+  color: var(--orb-error-color);
+}
+
+/* 댓글 목록 */
+.orb-comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--orb-spacing-md);
+}
+
+/* 댓글 아이템 */
+.orb-comment {
+  position: relative;
+  padding: var(--orb-spacing-md);
+  border: var(--orb-border-width) solid var(--orb-border-color);
+  border-radius: var(--orb-border-radius);
+  background: var(--orb-background);
+}
+
+.orb-comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--orb-spacing-md);
+  margin-bottom: var(--orb-spacing-sm);
+  min-height: 32px;
+}
+
+.orb-comment-header > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: var(--orb-spacing-sm);
+}
+
+.orb-delete-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--orb-spacing-sm);
+  max-width: 250px;
+}
+
+.orb-comment-author {
+  font-weight: 600;
+  color: var(--orb-text-color);
+}
+
+.orb-comment-date {
+  font-size: var(--orb-font-size-sm);
+  color: var(--orb-text-secondary);
+}
+
+.orb-comment-edited {
+  font-size: var(--orb-font-size-sm);
+  color: var(--orb-text-secondary);
+  opacity: 0.8;
+}
+
+.orb-comment-content {
+  margin-bottom: var(--orb-spacing-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.orb-comment-actions {
+  display: flex;
+  gap: var(--orb-spacing-sm);
+  align-items: center;
+}
+
+/* 삭제 비밀번호 입력 */
+.orb-delete-password-input {
+  flex: 1;
+  min-width: 80px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+  animation: slideInFromRight 0.2s ease-out;
+}
+
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+    max-width: 0;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    max-width: 200px;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 답글 폼 */
+.orb-reply-form {
+  animation: fadeInDown 0.2s ease-out;
+}
+
+/* 대댓글 */
+.orb-replies {
+  margin-top: var(--orb-spacing-md);
+  margin-left: var(--orb-spacing-lg);
+  padding-left: var(--orb-spacing-md);
+  border-left: 2px solid var(--orb-border-color);
+  display: flex;
+  flex-direction: column;
+  gap: var(--orb-spacing-md);
+}
+
+/* 수정 폼 */
+.orb-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--orb-spacing-sm);
+  animation: fadeInDown 0.2s ease-out;
+}
+
+/* 삭제된 댓글 */
+.orb-comment-deleted {
+  opacity: 0.6;
+}
+
+.orb-comment-deleted .orb-comment-content {
+  font-style: italic;
+  color: var(--orb-text-secondary);
+}
+
+/* 에러 오버레이 */
+.orb-error-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.orb-error-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: var(--orb-border-radius);
+}
+
+.orb-error-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: var(--orb-spacing-sm) var(--orb-spacing-md);
+  margin-bottom: var(--orb-spacing-md);
+  background: #fee;
+  color: var(--orb-error-color);
+  border-radius: var(--orb-border-radius);
+  font-size: var(--orb-font-size-sm);
+  min-width: 250px;
+  max-width: 90%;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  animation: scaleIn 0.2s ease-out;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.orb-error-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--orb-text-secondary);
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.orb-error-close:hover {
+  background: var(--orb-background-secondary);
+  color: var(--orb-text-color);
+}
+
+.orb-error-content {
+  color: var(--orb-error-color);
+  font-size: var(--orb-font-size-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* 버튼 컴포넌트 */
+.orb-btn {
+  border: none;
+  border-radius: var(--orb-border-radius);
+  font-family: var(--orb-font-family);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  outline: none;
+}
+
+.orb-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 사이즈 */
+.orb-btn-normal {
+  padding: var(--orb-spacing-sm) var(--orb-spacing-md);
+  font-size: var(--orb-font-size-base);
+}
+
+.orb-btn-small {
+  padding: 0.25rem 0.625rem;
+  font-size: 0.8125rem;
+  border-radius: calc(var(--orb-border-radius) * 0.75);
+}
+
+/* Filled + Primary */
+.orb-btn-filled.orb-btn-primary {
+  background: var(--orb-primary-color);
+  color: white;
+}
+
+.orb-btn-filled.orb-btn-primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* Filled + Secondary */
+.orb-btn-filled.orb-btn-secondary {
+  background: var(--orb-text-secondary);
+  color: white;
+}
+
+.orb-btn-filled.orb-btn-secondary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* Filled + Cancel */
+.orb-btn-filled.orb-btn-cancel {
+  background: var(--orb-background-secondary);
+  color: var(--orb-text-secondary);
+  border: var(--orb-border-width) solid var(--orb-border-color);
+}
+
+.orb-btn-filled.orb-btn-cancel:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+/* Clear + Primary */
+.orb-btn-clear.orb-btn-primary {
+  background: transparent;
+  color: var(--orb-primary-color);
+}
+
+.orb-btn-clear.orb-btn-primary:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+/* Clear + Secondary */
+.orb-btn-clear.orb-btn-secondary {
+  background: transparent;
+  color: var(--orb-text-secondary);
+}
+
+.orb-btn-clear.orb-btn-secondary:hover:not(:disabled) {
+  background: var(--orb-background-secondary);
+  color: var(--orb-text-color);
+}
+
+/* Clear + Cancel */
+.orb-btn-clear.orb-btn-cancel {
+  background: transparent;
+  color: var(--orb-text-secondary);
+}
+
+.orb-btn-clear.orb-btn-cancel:hover:not(:disabled) {
+  background: var(--orb-background-secondary);
+}
+
+/* Filled + Danger */
+.orb-btn-filled.orb-btn-danger {
+  background: var(--orb-error-color);
+  color: white;
+}
+
+.orb-btn-filled.orb-btn-danger:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* Clear + Danger */
+.orb-btn-clear.orb-btn-danger {
+  background: transparent;
+  color: var(--orb-error-color);
+}
+
+.orb-btn-clear.orb-btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* 반응형 */
+@media (max-width: 640px) {
+  .orb-form-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .orb-replies {
+    margin-left: var(--orb-spacing-sm);
+    padding-left: var(--orb-spacing-sm);
+  }
+
+  .orb-comment-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--orb-spacing-sm);
+  }
+
+  .orb-delete-actions {
+    max-width: 100%;
+  }
+}

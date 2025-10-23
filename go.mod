@@ -10,16 +10,18 @@ require (
 	github.com/go-chi/cors v1.2.1 // CORS 미들웨어 (도메인 간 요청 허용)
 )
 
-require github.com/lib/pq v1.10.9
+require (
+	github.com/golang-migrate/migrate/v4 v4.19.0
+	github.com/joho/godotenv v1.5.1
+	github.com/lib/pq v1.10.9
+	github.com/microcosm-cc/bluemonday v1.0.27
+	golang.org/x/crypto v0.43.0
+)
 
 require (
 	github.com/aymerick/douceur v0.2.0 // indirect
-	github.com/golang-migrate/migrate/v4 v4.19.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/joho/godotenv v1.5.1 // indirect
-	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/net v0.45.0 // indirect
 )
