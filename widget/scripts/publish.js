@@ -49,9 +49,11 @@ async function publish() {
     await $`git pull origin main`;
     console.log("✅ Updated to latest main");
 
-    // 5. 빌드 실행
+    // 5. 빌드 실행 (production 환경으로 직접 빌드)
     console.log(`\n📦 Building widget for version ${version}...`);
-    await $`bun --env-file=.env.production run build`;
+    await $`bun --env-file=.env.production build src/main.tsx --outdir ../static --env 'ORB_PUBLIC_*' --minify --format iife --target browser`;
+    await $`mv ../static/main.js ../static/embed.js`;
+    await $`mv ../static/main.css ../static/embed.css`;
     console.log("✅ Build complete");
 
     // 6. 타겟 브랜치가 이미 존재하는지 확인 (로컬 또는 리모트)
