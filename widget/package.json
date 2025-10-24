@@ -7,8 +7,7 @@
   "scripts": {
     "dev": "nodemon --watch src --ext ts,tsx,css --exec 'bun build src/main.tsx --outdir ../static --env ORB_PUBLIC_* --format iife --target browser && mv ../static/main.js ../static/embed.js && mv ../static/main.css ../static/embed.css'",
     "build": "NODE_ENV=production bun build src/main.tsx --outdir ../static --env ORB_PUBLIC_* --minify --format iife --target browser && mv ../static/main.js ../static/embed.js && mv ../static/main.css ../static/embed.css",
-    "publish:develop": "bun run scripts/publish.js develop",
-    "publish:main": "bun run scripts/publish.js main"
+    "publish": "bun run scripts/publish.js"
   },
   "devDependencies": {
     "@types/bun": "latest",
