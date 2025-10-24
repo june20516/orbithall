@@ -92,6 +92,11 @@ Proposed | Accepted | Deprecated | Superseded
 | 번호 | 제목 | 상태 | 날짜 |
 |------|------|------|------|
 | [001](001-database-migration-strategy.md) | 데이터베이스 마이그레이션 전략 | Accepted | 2025-10-02 |
+| [002](002-transaction-based-testing-strategy.md) | 트랜잭션 기반 테스트 전략 | Accepted | 2025-10-22 |
+| [003](003-database-sql-over-orm.md) | 데이터베이스 접근 방식 (SQL vs ORM) | Accepted | 2025-10-22 |
+| [004](004-comment-sorting-strategy.md) | 댓글 정렬 전략 | Accepted | 2025-10-22 |
+| [005](005-timestamp-function-strategy.md) | Timestamp 함수 전략 | Accepted | 2025-10-22 |
+| [006](006-widget-versioning-deployment-strategy.md) | Widget 버전 관리 및 배포 전략 | Accepted | 2025-10-24 |
 
 ## 참고 자료
 

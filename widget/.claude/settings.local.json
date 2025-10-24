@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/bran/personal/orbithall/docs/tasks/active/**)",
+      "Read(//Users/bran/personal/orbithall/docs/specs/**)",
+      "Read(//Users/bran/personal/orbithall/docs/adr/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

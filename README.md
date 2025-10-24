@@ -128,136 +128,28 @@ Headers: X-Orbithall-API-Key
 
 **참고**: CORS는 사이트별 동적 검증 방식을 사용합니다. 각 사이트의 `cors_origins` 배열로 관리됩니다.
 
-## JS Widget 사용 가이드
+## JS Widget
 
-OrbitHall은 임베드형 JavaScript 위젯을 제공합니다. 블로그나 웹사이트에 간단하게 추가할 수 있습니다.
+블로그나 웹사이트에 임베드할 수 있는 댓글 위젯을 제공합니다.
 
-### 1. 기본 사용법
+### 빠른 시작
 
 ```html
-<!DOCTYPE html>
-<html>
-<head>
-  <!-- CSS 로드 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@main/static/embed.css">
-</head>
-<body>
-  <!-- 댓글 위젯 컨테이너 -->
-  <div
-    data-widget-type="comments"
-    data-post-slug="my-first-post"
-  ></div>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.css">
 
-  <!-- JS 로드 및 초기화 -->
-  <script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@main/static/embed.js"></script>
-  <script>
-    OrbitHall.init({
-      apiKey: 'YOUR_API_KEY_HERE'
-    });
-  </script>
-</body>
-</html>
-```
+<div data-orb-container data-widget-type="comments" data-post-slug="your-post-id"></div>
 
-### 2. Next.js (App Router) 연동
-
-```tsx
-// app/layout.tsx - 레이아웃에서 한 번만 초기화
-import Script from 'next/script';
-
-export default function RootLayout({ children }) {
-  return (
-    <html>
-      <head>
-        <link
-          rel="stylesheet"
-          href="https://cdn.jsdelivr.net/gh/june20516/orbithall@main/static/embed.css"
-        />
-      </head>
-      <body>
-        {children}
-
-        <Script
-          src="https://cdn.jsdelivr.net/gh/june20516/orbithall@main/static/embed.js"
-          onLoad={() => {
-            window.OrbitHall.init({
-              apiKey: process.env.NEXT_PUBLIC_ORBITHALL_API_KEY!
-            });
-          }}
-        />
-      </body>
-    </html>
-  );
-}
-
-// app/posts/[slug]/page.tsx - 각 포스트 페이지
-export default function PostPage({ params }: { params: { slug: string } }) {
-  return (
-    <article>
-      <h1>Post Title</h1>
-      <div>{/* Post content */}</div>
-
-      {/* 댓글 위젯 - data-post-slug만 변경하면 자동 리로드 */}
-      <div
-        data-widget-type="comments"
-        data-post-slug={params.slug}
-      />
-    </article>
-  );
-}
-```
-
-### 3. WordPress 연동
-
-```php
-<!-- single.php 또는 테마 파일 -->
-<div
-  data-widget-type="comments"
-  data-post-slug="<?php echo get_post_field('post_name'); ?>"
-></div>
-
-<?php wp_footer(); ?>
-<script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@main/static/embed.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.js"></script>
 <script>
-  OrbitHall.init({
-    apiKey: '<?php echo get_option('orbithall_api_key'); ?>'
-  });
+  OrbitHall.init({ apiKey: 'YOUR_API_KEY' });
 </script>
 ```
 
-### 4. 스타일 커스터마이징
-
-CSS 변수를 사용하여 위젯 스타일을 커스터마이징할 수 있습니다:
-
-```css
-:root {
-  --orbithall-primary-color: #3b82f6;
-  --orbithall-border-radius: 0.5rem;
-  --orbithall-font-family: 'Your Font', sans-serif;
-}
-```
-
-사용 가능한 CSS 변수 목록은 `widget/src/styles.css`를 참고하세요.
-
-### 5. 개발 환경
-
-로컬 개발 시 위젯은 자동으로 로컬 API를 사용합니다:
-- **개발**: `http://localhost:8080/api`
-- **프로덕션**: `https://orbithall.onrender.com/api`
-
-```bash
-# 위젯 개발 모드 (watch + hot reload)
-cd widget
-bun install
-bun run dev
-
-# 프로덕션 빌드
-bun run build
-
-# 브랜치별 배포
-bun run publish:develop  # develop 브랜치로 배포 (베타)
-bun run publish:main     # main 브랜치로 배포 (프로덕션)
-```
+**상세한 사용법은 [widget/README.md](widget/README.md)를 참고하세요.**
+- Next.js, React 통합 가이드
+- 스타일 커스터마이징
+- 다국어 설정
+- API 레퍼런스
 
 ## 블로그와 연동 (직접 API 호출)
 
