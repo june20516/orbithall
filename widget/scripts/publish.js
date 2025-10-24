@@ -51,9 +51,7 @@ async function publish() {
 
     // 5. 빌드 실행 (production 환경으로 직접 빌드)
     console.log(`\n📦 Building widget for version ${version}...`);
-    await $`bun --env-file=.env.production build src/main.tsx --outdir ../static --env 'ORB_PUBLIC_*' --minify --format iife --target browser`;
-    await $`mv ../static/main.js ../static/embed.js`;
-    await $`mv ../static/main.css ../static/embed.css`;
+    await $`bun run build`;
     console.log("✅ Build complete");
 
     // 6. 타겟 브랜치가 이미 존재하는지 확인 (로컬 또는 리모트)

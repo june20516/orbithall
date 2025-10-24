@@ -1,13 +1,13 @@
 {
   "name": "orbithall-widget",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "module": "src/main.tsx",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "nodemon --watch src --ext ts,tsx,css --exec 'bun build src/main.tsx --outdir ../static --env ORB_PUBLIC_* --format iife --target browser && mv ../static/main.js ../static/embed.js && mv ../static/main.css ../static/embed.css'",
     "build": "bun build src/main.tsx --outdir ../static --env ORB_PUBLIC_* --minify --format iife --target browser && mv ../static/main.js ../static/embed.js && mv ../static/main.css ../static/embed.css",
-    "publish": "bun run scripts/publish.js"
+    "publish": "bun --env-file=.env.production run scripts/publish.js"
   },
   "devDependencies": {
     "@types/bun": "latest",
