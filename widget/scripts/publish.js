@@ -51,16 +51,15 @@ async function publish() {
 
     // 5. 빌드 실행
     console.log(`\n📦 Building widget for version ${version}...`);
-    await $`bun run build`;
+    await $`bun --env-file=.env.production run build`;
     console.log("✅ Build complete");
 
     // 6. 타겟 브랜치가 이미 존재하는지 확인 (로컬 또는 리모트)
     const localBranchExists = await $`git rev-parse --verify ${targetBranch}`
       .nothrow()
       .quiet();
-    const remoteBranchExists = await $`git ls-remote --heads origin ${targetBranch}`
-      .nothrow()
-      .quiet();
+    const remoteBranchExists =
+      await $`git ls-remote --heads origin ${targetBranch}`.nothrow().quiet();
 
     if (
       localBranchExists.exitCode === 0 ||
@@ -75,7 +74,9 @@ async function publish() {
         `  1. Bump version in package.json (e.g., ${version} -> 1.0.1)`
       );
       console.error("  2. If you really want to re-deploy this version:");
-      console.error(`     - Delete local branch: git branch -D ${targetBranch}`);
+      console.error(
+        `     - Delete local branch: git branch -D ${targetBranch}`
+      );
       console.error(
         `     - Delete remote branch: git push origin --delete ${targetBranch}`
       );
