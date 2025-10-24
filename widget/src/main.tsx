@@ -12,6 +12,9 @@ import './styles.css';
 
   const observers = new Map<string, MutationObserver>();
   let globalApiKey = '';
+  let globalLocale: Locale = 'ko';
+  let documentObserver: MutationObserver | null = null;
+  let isInitialized = false;
 
   // 고유 해시 생성 함수
   function generateHash(element: HTMLElement): string {
@@ -92,31 +95,77 @@ import './styles.css';
     observers.set(orbithallId, observer);
   }
 
+  // 전역 MutationObserver: 새로운 컨테이너가 추가되는 것을 감지
+  function startDocumentObserver() {
+    if (documentObserver) {
+      return; // 이미 실행 중
+    }
+
+    documentObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node instanceof HTMLElement) {
+            // 추가된 노드가 위젯 컨테이너인 경우
+            if (node.hasAttribute('data-orb-container')) {
+              observeContainer(node, API_URL, globalApiKey, globalLocale);
+            }
+            // 추가된 노드의 자식 중에 위젯 컨테이너가 있는 경우
+            const containers = node.querySelectorAll('[data-orb-container]');
+            containers.forEach((container) => {
+              if (container instanceof HTMLElement) {
+                observeContainer(container, API_URL, globalApiKey, globalLocale);
+              }
+            });
+          }
+        });
+      });
+    });
+
+    documentObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+
   // OrbitHall 네임스페이스
   window.OrbitHall = {
     // 위젯 초기화 함수
     init: function(config: OrbitHallInitConfig) {
+      if (isInitialized) {
+        console.warn('OrbitHall: already initialized');
+        return;
+      }
+
       if (!config.apiKey) {
         console.error('OrbitHall: apiKey is required');
         return;
       }
 
       globalApiKey = config.apiKey;
-      const locale = (config.locale || 'ko') as Locale;
+      globalLocale = (config.locale || 'ko') as Locale;
 
-      // 모든 OrbitHall 위젯 컨테이너 찾기
+      // 기존 컨테이너 초기화
       const containers = document.querySelectorAll('[data-orb-container]');
-
       containers.forEach((container) => {
         if (container instanceof HTMLElement) {
-          observeContainer(container, API_URL, globalApiKey, locale);
+          observeContainer(container, API_URL, globalApiKey, globalLocale);
         }
       });
+
+      // 전역 observer 시작 (SPA 라우팅 대응)
+      startDocumentObserver();
+
+      isInitialized = true;
     },
 
     destroy: function() {
       observers.forEach((observer) => observer.disconnect());
       observers.clear();
+      if (documentObserver) {
+        documentObserver.disconnect();
+        documentObserver = null;
+      }
+      isInitialized = false;
     }
   };
 })();
