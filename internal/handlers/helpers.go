@@ -3,47 +3,24 @@ package handlers
 import (
 	"net/http"
 	"strconv"
-	"strings"
+
+	"github.com/june20516/orbithall/internal/httputil"
 )
 
 // ============================================
 // HTTP 요청 관련 공통 헬퍼 함수
 // ============================================
 
-// GetIPAddress는 HTTP 요청에서 클라이언트의 실제 IP 주소를 추출합니다
-// 프록시나 로드 밸런서를 거친 경우를 고려하여 다음 순서로 확인합니다:
-// 1. X-Forwarded-For (프록시 체인의 첫 번째 IP)
-// 2. X-Real-IP (프록시가 설정한 실제 IP)
-// 3. RemoteAddr (직접 연결된 클라이언트 IP)
+// GetIPAddress는 httputil.GetIPAddress를 호출합니다
+// 하위 호환성을 위해 유지되며, 새 코드는 httputil.GetIPAddress를 직접 사용하는 것을 권장합니다
 func GetIPAddress(r *http.Request) string {
-	// X-Forwarded-For 헤더 확인 (쉼표로 구분된 IP 리스트)
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		// 첫 번째 IP가 실제 클라이언트 IP
-		ips := strings.Split(forwarded, ",")
-		return strings.TrimSpace(ips[0])
-	}
-
-	// X-Real-IP 헤더 확인
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		return realIP
-	}
-
-	// RemoteAddr 사용 (포트 번호 제거)
-	// RemoteAddr 형식: "192.168.1.1:12345"
-	ip := r.RemoteAddr
-	if idx := strings.LastIndex(ip, ":"); idx != -1 {
-		ip = ip[:idx]
-	}
-
-	return ip
+	return httputil.GetIPAddress(r)
 }
 
-// GetUserAgent는 HTTP 요청에서 User-Agent 헤더를 추출합니다
-// User-Agent는 클라이언트의 브라우저/앱 정보를 포함합니다
+// GetUserAgent는 httputil.GetUserAgent를 호출합니다
+// 하위 호환성을 위해 유지되며, 새 코드는 httputil.GetUserAgent를 직접 사용하는 것을 권장합니다
 func GetUserAgent(r *http.Request) string {
-	return r.Header.Get("User-Agent")
+	return httputil.GetUserAgent(r)
 }
 
 // ParseInt64Param은 문자열을 int64로 파싱합니다

@@ -421,7 +421,7 @@ func TestDeleteComment(t *testing.T) {
 	t.Run("이미 삭제된 댓글 삭제 시 에러 반환", func(t *testing.T) {
 		// Given: 이미 삭제된 댓글이 존재함
 
-		postID := testhelpers.CreateTestPost(ctx, t, tx, siteID, "test-post-delete", "Test Post").ID
+		postID := testhelpers.CreateTestPost(ctx, t, tx, siteID, "test-post-delete-2", "Test Post 2").ID
 
 		// 이미 삭제된 댓글 삽입
 		var commentID int64

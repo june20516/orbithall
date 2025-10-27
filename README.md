@@ -4,7 +4,7 @@
 
 ## 개요
 
-Orbithall은 Next.js SSG 블로그를 위한 독립형 댓글 시스템입니다. 블로그에 임베드하여 사용할 수 있으며, 별도의 서버에서 실행됩니다.
+Orbithall은 slug 기반 웹 콘텐츠를 위한 독립형 댓글 시스템입니다. 프레임워크나 빌드 방식에 관계없이 임베드하여 사용할 수 있으며, 별도의 서버에서 실행됩니다.
 
 ## 기술 스택
 
@@ -35,8 +35,9 @@ orbithall/
 ## 사전 요구사항
 
 - Docker Desktop (필수)
+- Go 1.25 (권장, 테스트 실행용)
 
-모든 개발 환경이 Docker 컨테이너에서 실행되므로 Go, PostgreSQL 등의 로컬 설치가 불필요합니다.
+API 서버와 PostgreSQL은 Docker에서 실행되며, 테스트는 로컬 Go에서 실행합니다.
 
 ## 로컬 개발 환경 구성
 
@@ -128,6 +129,35 @@ Headers: X-Orbithall-API-Key
 
 **참고**: CORS는 사이트별 동적 검증 방식을 사용합니다. 각 사이트의 `cors_origins` 배열로 관리됩니다.
 
+## Rate Limiting
+
+API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
+
+### 제한 정책
+
+- **댓글 작성**: 10회/분 (burst: 5)
+- **댓글 조회**: 제한 없음
+- **댓글 수정/삭제**: 제한 없음 (30분 시간 제한으로 충분)
+
+### 제한 초과 시
+
+- **HTTP 상태 코드**: 429 Too Many Requests
+- **응답 예시**:
+  ```json
+  {
+    "error": "rate_limit_exceeded",
+    "message": "Too many requests. Please try again later."
+  }
+  ```
+- **Retry-After 헤더**: 재시도 대기 시간 (초 단위)
+
+### IP 추출 방식
+
+프록시 환경을 고려하여 다음 순서로 IP를 확인합니다:
+1. `X-Forwarded-For` 헤더 (첫 번째 IP)
+2. `X-Real-IP` 헤더
+3. `RemoteAddr` (직접 연결)
+
 ## JS Widget
 
 블로그나 웹사이트에 임베드할 수 있는 댓글 위젯을 제공합니다.
@@ -151,11 +181,11 @@ Headers: X-Orbithall-API-Key
 - 다국어 설정
 - API 레퍼런스
 
-## 블로그와 연동 (직접 API 호출)
+## 웹사이트 연동 (직접 API 호출)
 
 위젯을 사용하지 않고 직접 API를 호출하려면:
 
-### 1. API 호출 예시
+### API 호출 예시
 
 ```typescript
 // 댓글 조회
@@ -180,18 +210,6 @@ await fetch('https://orbithall.onrender.com/api/posts/my-post-slug/comments', {
     parentId: null // 대댓글인 경우 부모 댓글 ID
   })
 });
-```
-
-### 2. 개발 플로우
-
-```bash
-# 터미널 1: 블로그 실행
-cd codeverse
-yarn dev          # → http://localhost:3000
-
-# 터미널 2: 댓글 API 실행
-cd orbithall
-docker-compose up # → http://localhost:8080
 ```
 
 ## 개발 팁
@@ -280,9 +298,9 @@ go test -cover ./...
 - [x] 프로덕션 배포 (Render + Supabase)
 - [x] JS Widget 구현 (Preact + Bun)
 - [x] jsDelivr CDN 배포
-- [ ] Rate Limiting 구현
+- [x] Rate Limiting 구현
 - [ ] 반응(Reactions) 위젯 구현
-- [ ] 실제 블로그 연동
+- [ ] 실제 웹사이트 연동
 
 ## 라이선스
 
