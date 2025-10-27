@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -12,6 +13,8 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/june20516/orbithall/internal/database"
 	"github.com/june20516/orbithall/internal/handlers"
+	"github.com/june20516/orbithall/internal/ratelimit"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -52,6 +55,13 @@ func run() error {
 	// 핸들러 초기화
 	// ============================================
 	commentHandler := handlers.NewCommentHandler(db)
+
+	// ============================================
+	// Rate Limiter 초기화
+	// ============================================
+	// 댓글 작성 제한: 10 req/min, burst 5
+	// rate.Every()를 사용하여 분당 10개 = 6초당 1개로 설정
+	createCommentLimiter := ratelimit.NewRateLimiter(rate.Every(time.Minute/10), 5)
 
 	// ============================================
 	// 라우터 설정
@@ -108,7 +118,8 @@ func run() error {
 		r.Use(handlers.AuthMiddleware(db))
 
 		// 댓글 CRUD 엔드포인트
-		r.Post("/posts/{slug}/comments", commentHandler.CreateComment)
+		// 댓글 작성: Rate Limiting 적용 (10 req/min, burst 5)
+		r.With(ratelimit.RateLimitMiddleware(createCommentLimiter)).Post("/posts/{slug}/comments", commentHandler.CreateComment)
 		r.Get("/posts/{slug}/comments", commentHandler.ListComments)
 		r.Put("/comments/{id}", commentHandler.UpdateComment)
 		r.Delete("/comments/{id}", commentHandler.DeleteComment)

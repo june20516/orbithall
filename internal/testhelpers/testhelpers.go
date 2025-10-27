@@ -82,18 +82,21 @@ func SetupTxTest(t *testing.T, db *sql.DB) (context.Context, DBTX, func()) {
 }
 
 // CreateTestSite는 테스트용 사이트를 생성하고 API 키를 반환합니다
-// 사이트 생성 후 자동으로 생성된 UUID API 키를 반환합니다
+// 테스트용 API 키는 "orb_test_" prefix를 사용합니다
 func CreateTestSite(ctx context.Context, t *testing.T, db DBTX, name string, domain string, corsOrigins []string, isActive bool) models.Site {
 	t.Helper()
 
+	// 테스트용 API 키 생성
+	apiKey := models.GenerateAPIKey("orb_test_")
+
 	query := `
-		INSERT INTO sites (name, domain, cors_origins, is_active)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO sites (name, domain, api_key, cors_origins, is_active)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, name, domain, api_key, cors_origins, is_active, created_at, updated_at
 	`
 
 	var site models.Site
-	err := db.QueryRowContext(ctx, query, name, domain, pq.StringArray(corsOrigins), isActive).Scan(
+	err := db.QueryRowContext(ctx, query, name, domain, apiKey, pq.StringArray(corsOrigins), isActive).Scan(
 		&site.ID, &site.Name, &site.Domain, &site.APIKey, pq.Array(&site.CORSOrigins), &site.IsActive, &site.CreatedAt, &site.UpdatedAt,
 	)
 	if err != nil {
@@ -129,13 +132,16 @@ func CreateTestPost(ctx context.Context, t *testing.T, db DBTX, siteID int64, sl
 func CreateTestSiteWithID(ctx context.Context, t *testing.T, db DBTX, id int64, name string, domain string, corsOrigins []string, isActive bool) {
 	t.Helper()
 
+	// 테스트용 API 키 생성
+	apiKey := models.GenerateAPIKey("orb_test_")
+
 	query := `
-		INSERT INTO sites (id, name, domain, cors_origins, is_active)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO sites (id, name, domain, api_key, cors_origins, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (id) DO NOTHING
 	`
 
-	_, err := db.ExecContext(ctx, query, id, name, domain, pq.StringArray(corsOrigins), isActive)
+	_, err := db.ExecContext(ctx, query, id, name, domain, apiKey, pq.StringArray(corsOrigins), isActive)
 	if err != nil {
 		t.Fatalf("Failed to create test site with ID: %v", err)
 	}
