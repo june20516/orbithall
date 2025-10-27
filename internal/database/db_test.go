@@ -65,8 +65,8 @@ func TestNew_ValidURL_Success(t *testing.T) {
 
 	// Connection Pool 설정 검증
 	stats := db.Stats()
-	if stats.MaxOpenConnections != 100 {
-		t.Errorf("expected MaxOpenConnections=100, got %d", stats.MaxOpenConnections)
+	if stats.MaxOpenConnections != 10 {
+		t.Errorf("expected MaxOpenConnections=10, got %d", stats.MaxOpenConnections)
 	}
 }
 

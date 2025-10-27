@@ -23,7 +23,8 @@ func TestGetPostBySlug(t *testing.T) {
 	title := "Test Post"
 
 	t.Run("존재하는 포스트 조회 성공", func(t *testing.T) {
-		// Given: 테스트 데이터 삽입
+		// Given: 테스트 포스트 생성
+		testhelpers.CreateTestPost(ctx, t, tx, siteID, slug, title)
 
 		// When: GetPostBySlug 호출
 		post, err := GetPostBySlug(ctx, tx, siteID, slug)
