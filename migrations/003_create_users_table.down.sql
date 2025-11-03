@@ -1,0 +1,6 @@
+-- users 테이블 삭제
+BEGIN;
+
+DROP TABLE IF EXISTS users CASCADE;
+
+COMMIT;

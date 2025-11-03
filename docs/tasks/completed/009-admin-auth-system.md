@@ -331,7 +331,7 @@ INSERT INTO users (email, name, google_id) VALUES ('dup@example.com', 'Dup', 'go
 
 ## 예상 소요 시간
 - 예상: 4-6시간
-- 실제: (완료 후 기록)
+- 실제: 약 4시간
 
 ## 주의사항
 
@@ -356,9 +356,130 @@ INSERT INTO users (email, name, google_id) VALUES ('dup@example.com', 'Dup', 'go
 - golang-jwt: https://github.com/golang-jwt/jwt
 - Google ID Token: https://pkg.go.dev/google.golang.org/api/idtoken
 
+## 구현 체크리스트
+
+### 1. 데이터베이스 마이그레이션
+- [x] `migrations/003_create_users_table.up.sql` 작성
+- [x] `migrations/003_create_users_table.down.sql` 작성
+- [x] `migrations/004_create_user_sites_table.up.sql` 작성
+- [x] `migrations/004_create_user_sites_table.down.sql` 작성
+
+### 2. User 모델 구현
+- [x] `internal/models/user.go` 작성
+- [x] User 구조체 정의 (Email, Name, PictureURL, GoogleID)
+- [x] JSON 태그 추가 (GoogleID는 json:"-")
+
+### 3. User Repository 테스트 작성 (Red)
+- [x] `internal/database/users_test.go` 작성
+  - [x] TestCreateUser (신규 생성, 중복 Google ID, 중복 Email)
+  - [x] TestGetUserByGoogleID (존재/없음 케이스)
+  - [x] TestGetUserByEmail (존재/없음 케이스)
+  - [x] TestGetUserByID (존재/없음 케이스)
+  - [x] 테스트 실패 확인 (build failed)
+
+### 4. User Repository 구현 (Green)
+- [x] `internal/database/users.go` 작성
+  - [x] CreateUser 함수 (RETURNING으로 ID/타임스탬프 설정)
+  - [x] GetUserByGoogleID 함수 (없으면 nil 반환)
+  - [x] GetUserByEmail 함수
+  - [x] GetUserByID 함수
+  - [x] 모든 테스트 통과 확인 (마이그레이션 실행 후)
+
+### 5. JWT 유틸리티 준비
+- [x] `github.com/golang-jwt/jwt/v5` 의존성 추가
+- [x] `internal/auth` 디렉토리 생성
+
+### 6. JWT 유틸리티 테스트 작성 (Red)
+- [x] `internal/auth/jwt_test.go` 작성
+  - [x] TestGenerateJWT (성공, JWT_SECRET 없음, 짧은 시크릿)
+  - [x] TestValidateJWT (유효한 토큰, 잘못된 토큰, 빈 토큰, 잘못된 서명)
+  - [x] TestCustomClaims (만료 시간 확인)
+  - [x] 테스트 실패 확인 (build failed)
+
+### 7. JWT 유틸리티 구현 (Green)
+- [x] `internal/auth/jwt.go` 작성
+  - [x] CustomClaims 구조체 정의 (UserID, Email)
+  - [x] GenerateJWT 함수 (HS256, 만료 시간 설정)
+  - [x] ValidateJWT 함수 (토큰 검증, claims 파싱)
+  - [x] Sentinel errors (ErrInvalidToken, ErrExpiredToken)
+  - [x] 모든 테스트 통과 확인
+
+### 8. Google ID Token 검증 준비
+- [x] `google.golang.org/api/idtoken` 의존성 추가
+
+### 9. Google ID Token 검증 구현
+- [x] `internal/auth/google.go` 작성
+  - [x] GoogleIDTokenPayload 구조체 정의
+  - [x] VerifyGoogleIDToken 함수 구현
+  - [x] GOOGLE_CLIENT_ID 환경변수 검증
+  - [x] idtoken.Validate() 호출
+  - [x] sub claim에서 Google ID 추출
+- [x] `internal/auth/google_test.go` 작성 (환경변수 체크)
+
+### 10. Auth 핸들러 테스트 작성 (Red)
+- [x] `internal/handlers/auth_test.go` 작성
+  - [x] 필수 필드 누락 시 400 테스트
+  - [x] 잘못된 Content-Type 테스트
+  - [x] 잘못된 JSON 형식 테스트
+  - [x] 잘못된 Google Token 시 401 테스트
+  - [x] 테스트 실패 확인 (build failed)
+
+### 11. Auth 핸들러 구현 (Green)
+- [x] `internal/handlers/auth.go` 작성
+  - [x] AuthHandler 구조체, NewAuthHandler 생성자
+  - [x] GoogleVerify 핸들러 구현
+  - [x] JSON 요청 파싱 및 입력 검증
+  - [x] Google ID Token 검증
+  - [x] 사용자 조회/생성 (트랜잭션)
+  - [x] JWT 생성 및 응답
+  - [x] 모든 테스트 통과 확인
+
+### 12. 라우팅 설정
+- [x] `cmd/api/main.go` 수정
+  - [x] authHandler 초기화
+  - [x] `/auth` 라우트 그룹 추가 (인증 불필요)
+  - [x] `POST /auth/google/verify` 등록
+  - [x] 빌드 성공 확인
+
+### 13. 통합 테스트
+- [x] 마이그레이션 실행 (Docker)
+- [x] 전체 테스트 실행 (`go test ./...`)
+- [x] 모든 테스트 통과 확인
+
+### 14. 버그 수정
+- [x] docker-compose.yml 볼륨 마운트 이슈 해결
+  - [x] `./migrations:/migrations` 추가로 개발/프로덕션 양쪽 환경 지원
+- [x] User Repository 테스트 트랜잭션 이슈 해결
+  - [x] UNIQUE constraint 에러 발생 시 트랜잭션 abort 문제
+  - [x] 각 서브테스트마다 독립적인 트랜잭션 사용
+  - [x] 테스트 함수에 이유 주석 추가
+
+### 15. 문서화
+- [x] 작업 이력 업데이트
+- [x] 실제 소요 시간 기록
+- [x] 작업 완료 처리 (pending → completed로 이동)
+
 ---
 
 ## 작업 이력
+
+### [2025-11-03] 작업 완료
+- **완료된 구현**:
+  - DB 마이그레이션 (users, user_sites 테이블)
+  - User 모델 및 Repository (TDD)
+  - JWT 생성/검증 유틸리티 (TDD)
+  - Google ID Token 검증
+  - Auth 핸들러 (POST /auth/google/verify)
+  - 라우팅 설정
+- **해결한 이슈**:
+  - docker-compose 환경에서 마이그레이션 실행 안 되던 문제
+    - `volumes: - ./migrations:/migrations` 추가로 해결
+    - 개발/프로덕션 양쪽 환경 모두 지원
+  - User Repository 테스트 트랜잭션 abort 문제
+    - UNIQUE constraint 에러 발생 시 트랜잭션이 abort 상태로 전환되는 PostgreSQL 특성
+    - 각 서브테스트마다 독립적인 트랜잭션 사용으로 해결
+    - 테스트 함수에 명확한 주석 추가
+- **테스트 결과**: 전체 테스트 통과 (8개 패키지 모두 ok)
 
 ### [2025-10-29] 작업 문서 작성
 - TDD 기반 구현 단계 정의

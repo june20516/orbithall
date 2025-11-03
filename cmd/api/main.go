@@ -55,6 +55,7 @@ func run() error {
 	// 핸들러 초기화
 	// ============================================
 	commentHandler := handlers.NewCommentHandler(db)
+	authHandler := handlers.NewAuthHandler(db)
 
 	// ============================================
 	// Rate Limiter 초기화
@@ -110,6 +111,12 @@ func run() error {
 		w.WriteHeader(http.StatusOK)
 		// JSON 형식으로 응답
 		w.Write([]byte(`{"status":"ok","service":"orbithall"}`))
+	})
+
+	// Auth 라우트 그룹 (/auth 접두사, 인증 불필요)
+	r.Route("/auth", func(r chi.Router) {
+		// Google OAuth 검증 및 JWT 발급
+		r.Post("/google/verify", authHandler.GoogleVerify)
 	})
 
 	// API 라우트 그룹 (/api 접두사)
