@@ -14,8 +14,35 @@ import (
 	"github.com/june20516/orbithall/internal/database"
 	"github.com/june20516/orbithall/internal/handlers"
 	"github.com/june20516/orbithall/internal/ratelimit"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"golang.org/x/time/rate"
+
+	_ "github.com/june20516/orbithall/docs" // swagger docs
 )
+
+// @title           Orbithall API
+// @version         1.0
+// @description     임베드형 댓글 시스템 API
+// @termsOfService  https://orbithall.onrender.com/terms
+
+// @contact.name   API Support
+// @contact.email  support@orbithall.com
+
+// @license.name  MIT
+// @license.url   https://opensource.org/licenses/MIT
+
+// @host      localhost:8080
+// @BasePath  /
+
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name X-Orbithall-API-Key
+// @description 위젯 접근용 API Key (사이트별 발급)
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description JWT 토큰 ("Bearer " 접두사 포함)
 
 func main() {
 	if err := run(); err != nil {
@@ -148,6 +175,14 @@ func run() error {
 		r.Put("/sites/{id}", adminHandler.UpdateSite)
 		r.Delete("/sites/{id}", adminHandler.DeleteSite)
 	})
+
+	// ============================================
+	// Swagger UI
+	// ============================================
+	// OpenAPI 3.0 문서 및 인터랙티브 API 테스트 UI
+	r.Get("/swagger/*", httpSwagger.Handler(
+		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+	))
 
 	// ============================================
 	// 서버 시작

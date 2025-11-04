@@ -43,3 +43,8 @@ vendor/
 # build binary
 /api
 /orbithall
+
+# swagger docs
+/docs/docs.go
+/docs/swagger.json
+/docs/swagger.yaml
