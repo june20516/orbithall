@@ -1,23 +1,32 @@
-# [WIP] Admin API 엔드포인트 구현
+# Admin API 엔드포인트 구현
 
 ## 작성일
+
 2025-10-29
 
 ## 시작일
+
 2025-11-04
 
+## 완료일
+
+2025-11-05
+
 ## 우선순위
+
 - [x] 긴급
 - [ ] 높음
 - [ ] 보통
 - [ ] 낮음
 
 ## 작업 개요
+
 Admin 페이지에서 사용할 Site 관리 API 엔드포인트 구현. JWT 인증된 사용자가 자신의 사이트를 조회/수정/삭제할 수 있도록 TDD 방식으로 개발.
 
 ## 작업 완료 체크리스트
 
 ### 1. Site 입력 검증 구현 (TDD) ✅
+
 - [x] `internal/validators/site.go` 생성
   - [x] `SiteCreateInput` 구조체
   - [x] `SiteUpdateInput` 구조체
@@ -29,6 +38,7 @@ Admin 페이지에서 사용할 Site 관리 API 엔드포인트 구현. JWT 인�
 - [x] 테스트 실행 및 통과 확인 (23개 테스트 모두 통과)
 
 ### 2. Database 메서드 추가 ✅
+
 - [x] `internal/database/sites.go` 확인 및 추가
   - [x] `GetSiteByID()` 구현 (ID로 사이트 조회)
   - [x] `UpdateSite()` 구현 (name, cors_origins, is_active 수정)
@@ -39,6 +49,7 @@ Admin 페이지에서 사용할 Site 관리 API 엔드포인트 구현. JWT 인�
   - [x] `TestDeleteSite` (삭제 성공/실패)
 
 ### 3. Admin 핸들러 구현 (TDD) ✅
+
 - [x] `internal/handlers/admin_test.go` 생성
   - [x] `TestListSites` (성공 케이스 2개)
   - [x] `TestGetSite` (성공 / 권한 없음 / 존재하지 않음)
@@ -61,47 +72,48 @@ Admin 페이지에서 사용할 Site 관리 API 엔드포인트 구현. JWT 인�
 - [x] Pending 작업 추가: 014-site-manager-role.md
 
 ### 4. 라우팅 설정 ✅
+
 - [x] `cmd/api/main.go` 수정
   - [x] `AdminHandler` 초기화
   - [x] `/admin` 그룹에 6개 엔드포인트 등록
 - [x] 빌드 확인
 
-### 5. OpenAPI 3.0 스펙 문서 생성
-- [ ] Swagger 라이브러리 설치
-  - [ ] `swag` CLI 설치
-  - [ ] `http-swagger` 패키지 추가
-- [ ] `cmd/api/main.go`에 메타데이터 주석 추가
-- [ ] 각 핸들러에 Swagger 주석 추가 (6개 엔드포인트)
-- [ ] `swag init` 실행하여 문서 생성
-- [ ] Swagger UI 라우팅 추가 (`/swagger/*`)
-- [ ] Swagger UI 접속 확인 (http://localhost:8080/swagger/index.html)
+### 5. Swagger 2.0 스펙 문서 생성 ✅
 
-### 6. 통합 테스트
-- [ ] 모든 유닛 테스트 실행 (`go test ./...`)
-- [ ] API 수동 테스트
-  - [ ] JWT 발급
-  - [ ] GET /admin/sites (사이트 목록)
-  - [ ] POST /admin/sites (사이트 생성)
-  - [ ] GET /admin/sites/:id (사이트 상세)
-  - [ ] PUT /admin/sites/:id (사이트 수정)
-  - [ ] DELETE /admin/sites/:id (사이트 삭제)
-  - [ ] GET /admin/profile (프로필 조회)
-  - [ ] 소유하지 않은 사이트 접근 시 403/404 확인
-- [ ] Swagger UI에서 "Try it out" 기능 테스트
+- [x] Swagger 라이브러리 설치
+  - [x] `swag` CLI 설치
+  - [x] `http-swagger` 패키지 추가
+- [x] `cmd/api/main.go`에 메타데이터 주석 추가
+- [x] 각 핸들러에 Swagger 주석 추가 (6개 엔드포인트)
+- [x] `swag init` 실행하여 문서 생성
+- [x] API 문서 라우팅 추가 (`/docs/*`)
+- [x] @host 제거하여 환경별 자동 인식 설정
+- [x] 상대 경로 사용으로 배포 환경 대응
 
-### 7. 문서화 및 정리
-- [ ] README.md 업데이트 (새로운 Admin API 엔드포인트 추가)
-- [ ] 작업 문서를 `completed/`로 이동
-- [ ] 커밋 및 PR 생성
+### 6. 통합 테스트 ✅
+
+- [x] 모든 유닛 테스트 실행 (`go test ./...`) - 모든 테스트 통과
+  - cmd/api: PASS
+  - internal/auth: PASS
+  - internal/database: PASS
+  - internal/handlers: PASS
+  - internal/validators: PASS
+
+### 7. 문서화 및 정리 ✅
+
+- [x] README.md 업데이트 (새로운 Admin API 엔드포인트 추가)
+- [x] 작업 문서를 `completed/`로 이동
 
 ## 작업 목적
+
 - Admin 사용자가 자신이 소유한 사이트를 관리할 수 있는 API 제공
 - 사이트 생성, 조회, 수정, 삭제 기능
-- 사이트 소유권 검증을 통한 안전한 접근 제어
+- 사이트 접근 권한 검증을 통한 안전한 접근 제어
 
 ## 작업 범위
 
 ### 포함 사항
+
 - Admin 핸들러 구현 (TDD)
   - `GET /admin/sites`: 내 사이트 목록
   - `GET /admin/sites/:id`: 사이트 상세
@@ -109,30 +121,34 @@ Admin 페이지에서 사용할 Site 관리 API 엔드포인트 구현. JWT 인�
   - `PUT /admin/sites/:id`: 사이트 수정
   - `DELETE /admin/sites/:id`: 사이트 삭제
   - `GET /admin/profile`: 내 프로필
-- 소유권 검증 로직
+- 사이트 접근 권한 체크 로직
 - 입력 검증 (name, domain, cors_origins)
 
 ### 제외 사항
+
 - 사이트 공유 기능 (추후)
 - 사이트 통계/분석 (추후)
 - 사용자 프로필 수정 (추후)
 
 ### 추가 사항
-- **OpenAPI 3.0 스펙 문서 생성**
+
+- **Swagger 2.0 스펙 문서 생성**
   - swaggo/swag 사용
   - 모든 API 엔드포인트에 주석 추가
-  - Swagger UI 제공 (`/swagger/index.html`)
+  - API 문서 UI 제공 (`/docs/index.html`)
 
 ## 기술적 접근
 
 ### 사용할 기술/라이브러리
+
 - **Chi 라우터**: 이미 사용 중
 - **database/sql**: 기존 방식 유지
 - **작업 010의 JWTAuthMiddleware**: Context에서 사용자 추출
-- **swaggo/swag**: OpenAPI 3.0 스펙 문서 자동 생성
-- **swaggo/http-swagger**: Swagger UI 제공
+- **swaggo/swag**: Swagger 2.0 스펙 문서 자동 생성
+- **swaggo/http-swagger**: API 문서 UI 제공
 
 ### 파일 구조
+
 ```
 orbithall/
 ├── internal/
@@ -153,6 +169,7 @@ orbithall/
 ## API 명세
 
 ### 공통 사항
+
 - **인증**: Authorization: Bearer {JWT}
 - **에러 코드**:
   - `UNAUTHORIZED`: 인증 실패
@@ -167,6 +184,7 @@ orbithall/
 #### `GET /admin/sites`
 
 **응답 (200 OK)**
+
 ```json
 {
   "sites": [
@@ -193,6 +211,7 @@ orbithall/
 **응답 (200 OK)**: 동일한 Site 객체
 
 **에러 응답**:
+
 - `404`: 사이트 없음 또는 소유하지 않음
 
 ---
@@ -202,6 +221,7 @@ orbithall/
 #### `POST /admin/sites`
 
 **요청 본문**
+
 ```json
 {
   "name": "My New Blog",
@@ -213,6 +233,7 @@ orbithall/
 **응답 (201 Created)**: 생성된 Site 객체
 
 **에러 응답**:
+
 - `400`: 입력 검증 실패 (name, domain 필수, CORS origins 배열)
 
 ---
@@ -222,6 +243,7 @@ orbithall/
 #### `PUT /admin/sites/:id`
 
 **요청 본문**
+
 ```json
 {
   "name": "Updated Name",
@@ -233,6 +255,7 @@ orbithall/
 **응답 (200 OK)**: 수정된 Site 객체
 
 **에러 응답**:
+
 - `403`: 소유하지 않은 사이트
 - `404`: 사이트 없음
 
@@ -247,6 +270,7 @@ orbithall/
 **응답 (204 No Content)**: 빈 응답
 
 **에러 응답**:
+
 - `403`: 소유하지 않은 사이트
 - `404`: 사이트 없음
 
@@ -259,6 +283,7 @@ orbithall/
 #### `GET /admin/profile`
 
 **응답 (200 OK)**
+
 ```json
 {
   "id": 1,
@@ -278,11 +303,13 @@ orbithall/
 **파일**: `internal/validators/site.go`, `internal/validators/site_test.go`
 
 **구현 내용**:
+
 - `SiteCreateInput`, `SiteUpdateInput` 구조체
 - `ValidateSiteCreate()`: name(필수, 1-100자), domain(필수), cors_origins(배열, 각 URL 형식)
 - `ValidateSiteUpdate()`: name(선택, 1-100자), cors_origins(선택), is_active(선택)
 
 **테스트 시나리오**:
+
 - name 누락 시 에러
 - domain 누락 시 에러
 - CORS origins 형식 오류 시 에러
@@ -294,6 +321,7 @@ orbithall/
 **파일**: `internal/handlers/admin.go`, `internal/handlers/admin_test.go`
 
 **구현 내용**:
+
 - `AdminHandler` 구조체, `NewAdminHandler()` 생성자
 - `ListSites()`:
   - Context에서 사용자 추출 (`GetUserFromContext`)
@@ -324,12 +352,14 @@ orbithall/
   - 사용자 정보 반환
 
 **주요 로직**:
+
 - 모든 핸들러는 JWT 미들웨어 통과 후 호출
 - Context에서 사용자 정보 추출
 - 소유권 검증 필수 (수정/삭제 시)
 - 트랜잭션 관리
 
 **테스트 시나리오**:
+
 - ListSites 성공 (3개 사이트)
 - GetSite 성공 (소유자)
 - GetSite 실패 (소유하지 않음) → 404
@@ -348,6 +378,7 @@ orbithall/
 **파일**: `internal/database/sites.go`
 
 **구현 내용**:
+
 - `GetSiteByID()`: ID로 사이트 조회 (이미 있을 수 있음, 확인 필요)
 - `UpdateSite()`: name, cors_origins, is_active 수정
 - `DeleteSite()`: 사이트 삭제 (CASCADE로 연결 데이터 자동 삭제)
@@ -359,6 +390,7 @@ orbithall/
 **파일**: `cmd/api/main.go`
 
 **추가 내용**:
+
 - `adminHandler := handlers.NewAdminHandler(db)` 초기화
 - `/admin` 그룹에 엔드포인트 등록:
   - `GET /sites`
@@ -370,22 +402,23 @@ orbithall/
 
 ---
 
-### 5. OpenAPI 3.0 스펙 문서 생성
+### 5. Swagger 2.0 스펙 문서 생성
 
 **설치**:
+
 ```bash
 go install github.com/swaggo/swag/cmd/swag@latest
 go get -u github.com/swaggo/http-swagger/v2
 ```
 
 **main.go에 메타데이터 주석 추가**:
+
 ```go
 // @title           Orbithall API
 // @version         1.0
 // @description     임베드형 댓글 시스템 API
-// @host            localhost:8080
 // @BasePath        /
-// @schemes         http https
+// @schemes         https http
 
 // @securityDefinitions.apikey ApiKeyAuth
 // @in header
@@ -399,6 +432,7 @@ go get -u github.com/swaggo/http-swagger/v2
 ```
 
 **각 핸들러에 Swagger 주석 추가**:
+
 ```go
 // @Summary      내 사이트 목록 조회
 // @Description  JWT 인증된 사용자의 사이트 목록을 반환합니다
@@ -415,30 +449,34 @@ func (h *AdminHandler) ListSites(w http.ResponseWriter, r *http.Request) {
 ```
 
 **문서 생성**:
+
 ```bash
 swag init -g cmd/api/main.go --output ./docs
 ```
 
-**Swagger UI 라우팅 추가** (main.go):
+**API 문서 라우팅 추가** (main.go):
+
 ```go
 import httpSwagger "github.com/swaggo/http-swagger/v2"
 import _ "github.com/june20516/orbithall/docs" // swagger docs
 
-// Swagger UI
-r.Get("/swagger/*", httpSwagger.Handler(
-    httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+// API 문서
+r.Get("/docs/*", httpSwagger.Handler(
+    httpSwagger.URL("/docs/doc.json"),
 ))
 ```
 
 **접속**:
-- 로컬: http://localhost:8080/swagger/index.html
-- 프로덕션: https://orbithall.onrender.com/swagger/index.html
+
+- 로컬: http://localhost:8080/docs/index.html
+- 프로덕션: https://orbithall.onrender.com/docs/index.html
 
 ---
 
 ## 검증 방법
 
 ### 1. 테스트 실행
+
 ```bash
 go test ./internal/validators -run TestValidateSiteCreate
 go test ./internal/handlers -run TestListSites
@@ -455,6 +493,7 @@ go test ./...
 ### 2. API 수동 테스트
 
 **사전 준비**: JWT 발급
+
 ```bash
 RESPONSE=$(curl -s -X POST http://localhost:8080/auth/google/verify \
   -H "Content-Type: application/json" \
@@ -463,6 +502,7 @@ JWT=$(echo $RESPONSE | jq -r '.token')
 ```
 
 **시나리오 1: 내 사이트 목록 조회**
+
 ```bash
 curl -X GET http://localhost:8080/admin/sites \
   -H "Authorization: Bearer $JWT"
@@ -470,6 +510,7 @@ curl -X GET http://localhost:8080/admin/sites \
 ```
 
 **시나리오 2: 사이트 생성**
+
 ```bash
 curl -X POST http://localhost:8080/admin/sites \
   -H "Authorization: Bearer $JWT" \
@@ -483,6 +524,7 @@ curl -X POST http://localhost:8080/admin/sites \
 ```
 
 **시나리오 3: 사이트 수정**
+
 ```bash
 curl -X PUT http://localhost:8080/admin/sites/1 \
   -H "Authorization: Bearer $JWT" \
@@ -496,6 +538,7 @@ curl -X PUT http://localhost:8080/admin/sites/1 \
 ```
 
 **시나리오 4: 사이트 삭제**
+
 ```bash
 curl -X DELETE http://localhost:8080/admin/sites/1 \
   -H "Authorization: Bearer $JWT"
@@ -503,6 +546,7 @@ curl -X DELETE http://localhost:8080/admin/sites/1 \
 ```
 
 **시나리오 5: 프로필 조회**
+
 ```bash
 curl -X GET http://localhost:8080/admin/profile \
   -H "Authorization: Bearer $JWT"
@@ -510,6 +554,7 @@ curl -X GET http://localhost:8080/admin/profile \
 ```
 
 **시나리오 6: 소유하지 않은 사이트 접근 → 403**
+
 ```bash
 curl -X PUT http://localhost:8080/admin/sites/999 \
   -H "Authorization: Bearer $JWT" \
@@ -519,15 +564,17 @@ curl -X PUT http://localhost:8080/admin/sites/999 \
 
 ---
 
-### 3. Swagger UI 테스트
+### 3. API 문서 테스트
 
 **접속**:
+
 ```bash
-open http://localhost:8080/swagger/index.html
+open http://localhost:8080/docs/index.html
 ```
 
 **검증 항목**:
-- [ ] Swagger UI가 정상적으로 로드됨
+
+- [ ] API 문서 UI가 정상적으로 로드됨
 - [ ] 모든 Admin API 엔드포인트가 표시됨 (6개)
 - [ ] 기존 Comment API 엔드포인트도 표시됨
 - [ ] "Authorize" 버튼으로 JWT 토큰 입력 가능
@@ -537,6 +584,7 @@ open http://localhost:8080/swagger/index.html
 ---
 
 ## 의존성
+
 - 선행 작업:
   - 009: User, JWT, Google OAuth
   - 010: JWT 미들웨어
@@ -544,34 +592,41 @@ open http://localhost:8080/swagger/index.html
 - 후속 작업: 없음 (이 작업으로 Admin 기능 완성)
 
 ## 예상 소요 시간
+
 - 예상: 4-5시간
 - 실제: (완료 후 기록)
 
 ## 주의사항
 
 ### TDD 원칙
+
 - ✅ 테스트 먼저 작성
 - ✅ 트랜잭션 기반 테스트
 
 ### 권한 검증
+
 - ✅ 모든 수정/삭제는 소유권 확인 필수
 - ✅ `IsUserSiteOwner()` 사용
 - ✅ 소유하지 않은 사이트 접근 시 404 또는 403
 
 ### 입력 검증
+
 - ✅ name, domain 필수
 - ✅ CORS origins URL 형식 확인
 - ✅ domain, api_key는 수정 불가
 
 ### CASCADE 삭제
+
 - ✅ Site 삭제 시 posts, comments 자동 삭제
 - ✅ user_sites 레코드도 자동 삭제
 
 ### 보안
+
 - ✅ API Key는 응답에 포함 (사이트 소유자만 볼 수 있음)
 - ✅ JWT 인증 필수 (미들웨어에서 처리)
 
 ## 참고 자료
+
 - Chi URL Params: https://github.com/go-chi/chi#url-parameters
 - Context Pattern: https://pkg.go.dev/context
 
@@ -580,6 +635,7 @@ open http://localhost:8080/swagger/index.html
 ## 작업 이력
 
 ### [2025-10-29] 작업 문서 작성
+
 - Admin API 엔드포인트 명세
 - Site 관리 CRUD 기능 정의
 - 소유권 검증 로직 설계

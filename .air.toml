@@ -13,8 +13,8 @@ tmp_dir = "tmp"
   args_bin = []
   # 빌드된 바이너리 파일 경로
   bin = "./tmp/main"
-  # 빌드 명령어
-  cmd = "go build -o ./tmp/main ./cmd/api"
+  # 빌드 명령어 (Swagger 문서 자동 생성 후 빌드)
+  cmd = "/go/bin/swag init -g cmd/api/main.go --output ./docs && go build -o ./tmp/main ./cmd/api"
   # 파일 변경 감지 후 재빌드까지 대기 시간 (밀리초)
   delay = 1000
   # 감시에서 제외할 디렉토리

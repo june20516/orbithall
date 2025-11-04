@@ -450,3 +450,133 @@ func TestDecrementCommentCount(t *testing.T) {
 		}
 	})
 }
+
+// TestListPostsBySite는 사이트별 Post 목록 조회 기능을 테스트합니다
+func TestListPostsBySite(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer Close(db)
+
+	t.Run("Post 목록 조회 성공 - 댓글 수 포함", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// 테스트 사이트 생성
+		site := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "test.com",
+			[]string{"https://test.com"}, true)
+
+		// Post 3개 생성 (댓글 수가 다름)
+		post1 := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "post-1", "Post 1")
+		post2 := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "post-2", "Post 2")
+		_ = testhelpers.CreateTestPost(ctx, t, tx, site.ID, "post-3", "Post 3") // post3는 댓글 없음
+
+		// post1에 3개 댓글
+		for i := 0; i < 3; i++ {
+			_, err := CreateComment(ctx, tx, post1.ID, nil, "Author", "password123",
+				"Comment", "127.0.0.1", "test-agent")
+			if err != nil {
+				t.Fatalf("Failed to create comment: %v", err)
+			}
+		}
+
+		// post2에 2개 댓글 (1개는 삭제)
+		for i := 0; i < 2; i++ {
+			_, err := CreateComment(ctx, tx, post2.ID, nil, "Author", "password123",
+				"Comment", "127.0.0.1", "test-agent")
+			if err != nil {
+				t.Fatalf("Failed to create comment: %v", err)
+			}
+		}
+		// post2의 댓글 1개 삭제
+		var commentID int64
+		err := tx.QueryRowContext(ctx, `
+			SELECT id FROM comments WHERE post_id = $1 LIMIT 1
+		`, post2.ID).Scan(&commentID)
+		if err != nil {
+			t.Fatalf("Failed to get comment ID: %v", err)
+		}
+		err = DeleteComment(ctx, tx, commentID)
+		if err != nil {
+			t.Fatalf("Failed to delete comment: %v", err)
+		}
+
+		// post3에는 댓글 없음
+
+		// Post 목록 조회
+		posts, err := ListPostsBySite(ctx, tx, site.ID)
+		if err != nil {
+			t.Fatalf("Failed to list posts: %v", err)
+		}
+
+		// 검증
+		if len(posts) != 3 {
+			t.Errorf("Expected 3 posts, got %d", len(posts))
+		}
+
+		// 각 Post의 댓글 수 확인
+		foundPost1 := false
+		foundPost2 := false
+		foundPost3 := false
+
+		for _, post := range posts {
+			switch post.Slug {
+			case "post-1":
+				foundPost1 = true
+				if post.CommentCount != 3 {
+					t.Errorf("Post1 expected comment count 3, got %d", post.CommentCount)
+				}
+				if post.ActiveCommentCount != 3 {
+					t.Errorf("Post1 expected active comment count 3, got %d", post.ActiveCommentCount)
+				}
+				if post.DeletedCommentCount != 0 {
+					t.Errorf("Post1 expected deleted comment count 0, got %d", post.DeletedCommentCount)
+				}
+			case "post-2":
+				foundPost2 = true
+				if post.CommentCount != 2 {
+					t.Errorf("Post2 expected comment count 2, got %d", post.CommentCount)
+				}
+				if post.ActiveCommentCount != 1 {
+					t.Errorf("Post2 expected active comment count 1, got %d", post.ActiveCommentCount)
+				}
+				if post.DeletedCommentCount != 1 {
+					t.Errorf("Post2 expected deleted comment count 1, got %d", post.DeletedCommentCount)
+				}
+			case "post-3":
+				foundPost3 = true
+				if post.CommentCount != 0 {
+					t.Errorf("Post3 expected comment count 0, got %d", post.CommentCount)
+				}
+				if post.ActiveCommentCount != 0 {
+					t.Errorf("Post3 expected active comment count 0, got %d", post.ActiveCommentCount)
+				}
+				if post.DeletedCommentCount != 0 {
+					t.Errorf("Post3 expected deleted comment count 0, got %d", post.DeletedCommentCount)
+				}
+			}
+		}
+
+		if !foundPost1 || !foundPost2 || !foundPost3 {
+			t.Error("Not all posts were found in the result")
+		}
+	})
+
+	t.Run("Post 목록 조회 성공 - Post가 없는 경우", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// 테스트 사이트 생성 (Post 없음)
+		site := testhelpers.CreateTestSite(ctx, t, tx, "Empty Site", "empty.com",
+			[]string{"https://empty.com"}, true)
+
+		// Post 목록 조회
+		posts, err := ListPostsBySite(ctx, tx, site.ID)
+		if err != nil {
+			t.Fatalf("Failed to list posts: %v", err)
+		}
+
+		// 검증
+		if len(posts) != 0 {
+			t.Errorf("Expected 0 posts, got %d", len(posts))
+		}
+	})
+}

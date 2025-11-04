@@ -344,3 +344,127 @@ func TestDeleteSite(t *testing.T) {
 		}
 	})
 }
+
+// TestGetSiteStats는 사이트 통계 조회 기능을 테스트합니다
+func TestGetSiteStats(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer Close(db)
+
+	t.Run("통계 조회 성공 - Post와 댓글이 있는 경우", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// 테스트 사이트 생성
+		site := testhelpers.CreateTestSite(ctx, t, tx, "Stats Test Site", "stats.test.com",
+			[]string{"https://stats.test.com"}, true)
+
+		// 3개의 다른 Post에 각각 3개의 댓글 생성
+		posts := []string{"post-1", "post-2", "post-3"}
+		totalComments := 0
+		for _, postSlug := range posts {
+			post := testhelpers.CreateTestPost(ctx, t, tx, site.ID, postSlug, "Test Post")
+
+			for i := 0; i < 3; i++ {
+				_, err := CreateComment(ctx, tx, post.ID, nil, "Author", "password123",
+					"Test comment", "127.0.0.1", "test-agent")
+				if err != nil {
+					t.Fatalf("Failed to create comment: %v", err)
+				}
+				totalComments++
+			}
+		}
+
+		// 통계 조회
+		stats, err := GetSiteStats(ctx, tx, site.ID)
+		if err != nil {
+			t.Fatalf("Failed to get site stats: %v", err)
+		}
+
+		// 검증
+		if stats.PostCount != 3 {
+			t.Errorf("Expected post count 3, got %d", stats.PostCount)
+		}
+		if stats.CommentCount != totalComments {
+			t.Errorf("Expected comment count %d, got %d", totalComments, stats.CommentCount)
+		}
+		if stats.DeletedCommentCount != 0 {
+			t.Errorf("Expected deleted comment count 0, got %d", stats.DeletedCommentCount)
+		}
+	})
+
+	t.Run("통계 조회 성공 - 삭제된 댓글 별도 카운트", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// 테스트 사이트 생성
+		site := testhelpers.CreateTestSite(ctx, t, tx, "Stats Test Site 2", "stats2.test.com",
+			[]string{"https://stats2.test.com"}, true)
+		post := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "post-1", "Test Post")
+
+		// 정상 댓글 2개 생성
+		for i := 0; i < 2; i++ {
+			_, err := CreateComment(ctx, tx, post.ID, nil, "Author", "password123",
+				"Test comment", "127.0.0.1", "test-agent")
+			if err != nil {
+				t.Fatalf("Failed to create comment: %v", err)
+			}
+		}
+
+		// 댓글 1개를 삭제 처리
+		var commentID int64
+		err := tx.QueryRowContext(ctx, `
+			SELECT id FROM comments WHERE post_id = $1 LIMIT 1
+		`, post.ID).Scan(&commentID)
+		if err != nil {
+			t.Fatalf("Failed to get comment ID: %v", err)
+		}
+
+		err = DeleteComment(ctx, tx, commentID)
+		if err != nil {
+			t.Fatalf("Failed to delete comment: %v", err)
+		}
+
+		// 통계 조회
+		stats, err := GetSiteStats(ctx, tx, site.ID)
+		if err != nil {
+			t.Fatalf("Failed to get site stats: %v", err)
+		}
+
+		// 검증 - 삭제된 댓글은 별도 카운트
+		if stats.PostCount != 1 {
+			t.Errorf("Expected post count 1, got %d", stats.PostCount)
+		}
+		if stats.CommentCount != 1 {
+			t.Errorf("Expected comment count 1 (active comments), got %d", stats.CommentCount)
+		}
+		if stats.DeletedCommentCount != 1 {
+			t.Errorf("Expected deleted comment count 1, got %d", stats.DeletedCommentCount)
+		}
+	})
+
+	t.Run("통계 조회 성공 - 댓글이 없는 경우", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// 테스트 사이트 생성 (댓글 없음)
+		site := testhelpers.CreateTestSite(ctx, t, tx, "Empty Stats Site", "empty.test.com",
+			[]string{"https://empty.test.com"}, true)
+
+		// 통계 조회
+		stats, err := GetSiteStats(ctx, tx, site.ID)
+		if err != nil {
+			t.Fatalf("Failed to get site stats: %v", err)
+		}
+
+		// 검증
+		if stats.PostCount != 0 {
+			t.Errorf("Expected post count 0, got %d", stats.PostCount)
+		}
+		if stats.CommentCount != 0 {
+			t.Errorf("Expected comment count 0, got %d", stats.CommentCount)
+		}
+		if stats.DeletedCommentCount != 0 {
+			t.Errorf("Expected deleted comment count 0, got %d", stats.DeletedCommentCount)
+		}
+	})
+}

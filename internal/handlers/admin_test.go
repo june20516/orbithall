@@ -572,3 +572,432 @@ func TestGetProfile(t *testing.T) {
 		}
 	})
 }
+
+// TestGetSiteStats는 사이트 통계 조회 기능을 테스트합니다
+func TestGetSiteStats(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	t.Run("통계 조회 성공", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 사용자 및 사이트 생성
+		user := &models.User{
+			Email:    "admin@example.com",
+			Name:     "Admin",
+			GoogleID: "google-admin",
+		}
+		if err := database.CreateUser(ctx, tx, user); err != nil {
+			t.Fatalf("Failed to create user: %v", err)
+		}
+
+		site := &models.Site{
+			Name:        "Test Site",
+			Domain:      "test.com",
+			CORSOrigins: []string{"https://test.com"},
+			IsActive:    true,
+		}
+		if err := database.CreateSiteForUser(ctx, tx, site, user.ID); err != nil {
+			t.Fatalf("Failed to create site: %v", err)
+		}
+
+		// Post 생성 및 댓글 추가
+		post := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "test-post", "Test Post")
+		for i := 0; i < 3; i++ {
+			_, err := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123",
+				"Comment", "127.0.0.1", "test-agent")
+			if err != nil {
+				t.Fatalf("Failed to create comment: %v", err)
+			}
+		}
+
+		// When: GetSiteStats 호출
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodGet, "/admin/sites/"+strconv.FormatInt(site.ID, 10)+"/stats", nil)
+		rec := httptest.NewRecorder()
+
+		// Context에 user 추가
+		ctx = context.WithValue(ctx, userContextKey, user)
+		req = req.WithContext(ctx)
+
+		// Chi URL 파라미터 추가
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", strconv.FormatInt(site.ID, 10))
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		handler.GetSiteStats(rec, req)
+
+		// Then: 응답 검증
+		if rec.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+
+		var stats models.SiteStats
+		json.Unmarshal(rec.Body.Bytes(), &stats)
+
+		if stats.PostCount != 1 {
+			t.Errorf("Expected post count 1, got %d", stats.PostCount)
+		}
+		if stats.CommentCount != 3 {
+			t.Errorf("Expected comment count 3, got %d", stats.CommentCount)
+		}
+		if stats.DeletedCommentCount != 0 {
+			t.Errorf("Expected deleted comment count 0, got %d", stats.DeletedCommentCount)
+		}
+	})
+
+	t.Run("권한 없음 - 다른 사용자의 사이트", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 두 명의 사용자
+		user1 := &models.User{
+			Email:    "user1@example.com",
+			Name:     "User 1",
+			GoogleID: "google-user1",
+		}
+		user2 := &models.User{
+			Email:    "user2@example.com",
+			Name:     "User 2",
+			GoogleID: "google-user2",
+		}
+		database.CreateUser(ctx, tx, user1)
+		database.CreateUser(ctx, tx, user2)
+
+		// user2의 사이트 생성
+		site := &models.Site{
+			Name:        "User2 Site",
+			Domain:      "user2.com",
+			CORSOrigins: []string{"https://user2.com"},
+			IsActive:    true,
+		}
+		database.CreateSiteForUser(ctx, tx, site, user2.ID)
+
+		// When: user1이 user2의 사이트 통계 조회 시도
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodGet, "/admin/sites/"+strconv.FormatInt(site.ID, 10)+"/stats", nil)
+		rec := httptest.NewRecorder()
+
+		// Context에 user1 추가
+		ctx = context.WithValue(ctx, userContextKey, user1)
+		req = req.WithContext(ctx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", strconv.FormatInt(site.ID, 10))
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		handler.GetSiteStats(rec, req)
+
+		// Then: 403 Forbidden
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("Expected status 403, got %d", rec.Code)
+		}
+	})
+}
+
+func TestListSitePosts(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	t.Run("포스트 목록 조회 성공", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 사용자와 사이트, 여러 개의 포스트(댓글 포함)
+		user := &models.User{
+			Email:    "test@example.com",
+			Name:     "Test User",
+			GoogleID: "google-test",
+		}
+		database.CreateUser(ctx, tx, user)
+
+		site := &models.Site{
+			Name:        "Test Blog",
+			Domain:      "test.com",
+			CORSOrigins: []string{"https://test.com"},
+			IsActive:    true,
+		}
+		database.CreateSiteForUser(ctx, tx, site, user.ID)
+
+		post1 := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "post-1", "Post 1")
+		post2 := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "post-2", "Post 2")
+		_ = testhelpers.CreateTestPost(ctx, t, tx, site.ID, "post-3", "Post 3") // post3는 댓글 없음
+
+		// post1: 활성 댓글 2개
+		_, _ = database.CreateComment(ctx, tx, post1.ID, nil, "author1", "pass", "comment1", "1.1.1.1", "ua")
+		_, _ = database.CreateComment(ctx, tx, post1.ID, nil, "author2", "pass", "comment2", "2.2.2.2", "ua")
+
+		// post2: 활성 댓글 1개, 삭제된 댓글 1개
+		_, _ = database.CreateComment(ctx, tx, post2.ID, nil, "author3", "pass", "comment3", "3.3.3.3", "ua")
+		comment4, _ := database.CreateComment(ctx, tx, post2.ID, nil, "author4", "pass", "comment4", "4.4.4.4", "ua")
+		_ = database.DeleteComment(ctx, tx, comment4.ID)
+
+		// When: 포스트 목록 조회
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodGet, "/admin/sites/"+strconv.FormatInt(site.ID, 10)+"/posts", nil)
+		rec := httptest.NewRecorder()
+
+		ctx = context.WithValue(ctx, userContextKey, user)
+		req = req.WithContext(ctx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", strconv.FormatInt(site.ID, 10))
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		handler.ListSitePosts(rec, req)
+
+		// Then: 200 OK 및 포스트 목록 반환
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", rec.Code)
+		}
+
+		var posts []*models.Post
+		if err := json.NewDecoder(rec.Body).Decode(&posts); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if len(posts) != 3 {
+			t.Errorf("Expected 3 posts, got %d", len(posts))
+		}
+
+		// post1 검증 (활성 댓글 2개)
+		found := false
+		for _, p := range posts {
+			if p.ID == post1.ID {
+				found = true
+				if p.ActiveCommentCount != 2 {
+					t.Errorf("post1: expected ActiveCommentCount 2, got %d", p.ActiveCommentCount)
+				}
+				if p.DeletedCommentCount != 0 {
+					t.Errorf("post1: expected DeletedCommentCount 0, got %d", p.DeletedCommentCount)
+				}
+			}
+		}
+		if !found {
+			t.Error("post1 not found in response")
+		}
+
+		// post2 검증 (활성 댓글 1개, 삭제된 댓글 1개)
+		found = false
+		for _, p := range posts {
+			if p.ID == post2.ID {
+				found = true
+				if p.ActiveCommentCount != 1 {
+					t.Errorf("post2: expected ActiveCommentCount 1, got %d", p.ActiveCommentCount)
+				}
+				if p.DeletedCommentCount != 1 {
+					t.Errorf("post2: expected DeletedCommentCount 1, got %d", p.DeletedCommentCount)
+				}
+			}
+		}
+		if !found {
+			t.Error("post2 not found in response")
+		}
+	})
+
+	t.Run("권한 없음 - 다른 사용자의 사이트", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 두 명의 사용자
+		user1 := &models.User{
+			Email:    "user1@example.com",
+			Name:     "User 1",
+			GoogleID: "google-user1",
+		}
+		user2 := &models.User{
+			Email:    "user2@example.com",
+			Name:     "User 2",
+			GoogleID: "google-user2",
+		}
+		database.CreateUser(ctx, tx, user1)
+		database.CreateUser(ctx, tx, user2)
+
+		// user2의 사이트 생성
+		site := &models.Site{
+			Name:        "User2 Blog",
+			Domain:      "user2.com",
+			CORSOrigins: []string{"https://user2.com"},
+			IsActive:    true,
+		}
+		database.CreateSiteForUser(ctx, tx, site, user2.ID)
+
+		// When: user1이 user2의 사이트 포스트 목록 조회 시도
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodGet, "/admin/sites/"+strconv.FormatInt(site.ID, 10)+"/posts", nil)
+		rec := httptest.NewRecorder()
+
+		ctx = context.WithValue(ctx, userContextKey, user1)
+		req = req.WithContext(ctx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", strconv.FormatInt(site.ID, 10))
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		handler.ListSitePosts(rec, req)
+
+		// Then: 403 Forbidden
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("Expected status 403, got %d", rec.Code)
+		}
+	})
+}
+
+func TestGetPostComments(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	t.Run("포스트 댓글 조회 성공 - 삭제된 댓글 포함, 전체 IP", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 사용자와 사이트, 포스트, 댓글(삭제된 것 포함)
+		user := &models.User{
+			Email:    "test@example.com",
+			Name:     "Test User",
+			GoogleID: "google-test",
+		}
+		database.CreateUser(ctx, tx, user)
+
+		site := &models.Site{
+			Name:        "Test Blog",
+			Domain:      "test.com",
+			CORSOrigins: []string{"https://test.com"},
+			IsActive:    true,
+		}
+		database.CreateSiteForUser(ctx, tx, site, user.ID)
+
+		post := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "test-post", "Test Post")
+
+		// 활성 댓글 2개
+		comment1, _ := database.CreateComment(ctx, tx, post.ID, nil, "author1", "pass", "comment1", "1.1.1.1", "ua")
+		_, _ = database.CreateComment(ctx, tx, post.ID, nil, "author2", "pass", "comment2", "2.2.2.2", "ua")
+
+		// 삭제된 댓글 1개
+		comment3, _ := database.CreateComment(ctx, tx, post.ID, nil, "author3", "pass", "deleted comment", "3.3.3.3", "ua")
+		_ = database.DeleteComment(ctx, tx, comment3.ID)
+
+		// 대댓글 1개 (활성)
+		_, _ = database.CreateComment(ctx, tx, post.ID, &comment1.ID, "reply-author", "pass", "reply", "4.4.4.4", "ua")
+
+		// When: 댓글 조회
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodGet, "/admin/posts/test-post/comments?site_id="+strconv.FormatInt(site.ID, 10), nil)
+		rec := httptest.NewRecorder()
+
+		ctx = context.WithValue(ctx, userContextKey, user)
+		req = req.WithContext(ctx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("slug", "test-post")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		handler.GetPostComments(rec, req)
+
+		// Then: 200 OK 및 댓글 목록 반환 (삭제된 것 포함)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+
+		var response struct {
+			Comments []*models.Comment `json:"comments"`
+			Total    int               `json:"total"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if response.Total != 3 {
+			t.Errorf("Expected total 3, got %d", response.Total)
+		}
+
+		if len(response.Comments) != 3 {
+			t.Errorf("Expected 3 comments, got %d", len(response.Comments))
+		}
+
+		// 삭제된 댓글이 포함되어 있는지 확인
+		foundDeleted := false
+		for _, c := range response.Comments {
+			if c.ID == comment3.ID {
+				foundDeleted = true
+				if !c.IsDeleted {
+					t.Error("Expected deleted comment to have IsDeleted=true")
+				}
+			}
+		}
+		if !foundDeleted {
+			t.Error("Deleted comment not found in response")
+		}
+
+		// IP 주소가 마스킹되지 않았는지 확인 (admin은 전체 IP 확인 가능)
+		// IPAddressUnmasked 필드에 전체 IP가 들어있어야 함
+		for _, c := range response.Comments {
+			if c.IPAddressUnmasked == "" || len(c.IPAddressUnmasked) < 7 { // "x.x.x.x" 형태가 아님
+				t.Errorf("Expected full IP address for comment %d, got: %s", c.ID, c.IPAddressUnmasked)
+			}
+			// IPAddressMasked도 있어야 함
+			if c.IPAddressMasked == "" {
+				t.Errorf("Expected masked IP address for comment %d", c.ID)
+			}
+			// 대댓글도 IP 확인
+			for _, reply := range c.Replies {
+				if reply.IPAddressUnmasked == "" || len(reply.IPAddressUnmasked) < 7 {
+					t.Errorf("Expected full IP address for reply %d, got: %s", reply.ID, reply.IPAddressUnmasked)
+				}
+				if reply.IPAddressMasked == "" {
+					t.Errorf("Expected masked IP address for reply %d", reply.ID)
+				}
+			}
+		}
+	})
+
+	t.Run("권한 없음 - 다른 사용자의 사이트", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 두 명의 사용자
+		user1 := &models.User{
+			Email:    "user1@example.com",
+			Name:     "User 1",
+			GoogleID: "google-user1",
+		}
+		user2 := &models.User{
+			Email:    "user2@example.com",
+			Name:     "User 2",
+			GoogleID: "google-user2",
+		}
+		database.CreateUser(ctx, tx, user1)
+		database.CreateUser(ctx, tx, user2)
+
+		// user2의 사이트와 포스트 생성
+		site := &models.Site{
+			Name:        "User2 Blog",
+			Domain:      "user2.com",
+			CORSOrigins: []string{"https://user2.com"},
+			IsActive:    true,
+		}
+		database.CreateSiteForUser(ctx, tx, site, user2.ID)
+
+		_ = testhelpers.CreateTestPost(ctx, t, tx, site.ID, "user2-post", "User2 Post")
+
+		// When: user1이 user2의 포스트 댓글 조회 시도
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodGet, "/admin/posts/user2-post/comments?site_id="+strconv.FormatInt(site.ID, 10), nil)
+		rec := httptest.NewRecorder()
+
+		ctx = context.WithValue(ctx, userContextKey, user1)
+		req = req.WithContext(ctx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("slug", "user2-post")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		handler.GetPostComments(rec, req)
+
+		// Then: 403 Forbidden
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("Expected status 403, got %d", rec.Code)
+		}
+	})
+}

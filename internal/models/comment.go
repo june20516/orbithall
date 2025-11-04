@@ -45,6 +45,11 @@ type Comment struct {
 	// 데이터베이스에 저장되지 않고, 런타임에서만 생성됩니다
 	IPAddressMasked string `json:"ip_address_masked,omitempty"`
 
+	// IPAddressUnmasked는 마스킹되지 않은 전체 IP 주소입니다 (Admin 전용)
+	// Admin API에서만 포함되며, 일반 API 응답에서는 제거됩니다
+	// 데이터베이스에 저장되지 않고, 런타임에서만 생성됩니다
+	IPAddressUnmasked string `json:"ip_address_unmasked,omitempty"`
+
 	// Replies는 이 댓글에 달린 대댓글 목록입니다
 	// 계층적 댓글 구조를 표현하기 위해 사용됩니다
 	// 데이터베이스에 저장되지 않고, 쿼리 결과를 조합하여 생성됩니다

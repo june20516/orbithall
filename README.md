@@ -73,9 +73,10 @@ curl http://localhost:8080/api/comments
 
 ## API 엔드포인트
 
-### Swagger 문서
+### API 문서
 
-- http://localhost:8080/swagger/index.html
+- 로컬: http://localhost:8080/docs/index.html
+- 프로덕션: https://orbithall.onrender.com/docs/index.html
 
 ### 헬스체크
 
@@ -129,6 +130,44 @@ Headers: X-Orbithall-API-Key
   }
 }
 ```
+
+### Admin API (JWT 인증 필요)
+
+관리자 전용 API로, Google OAuth를 통한 JWT 인증이 필요합니다.
+
+#### 인증
+
+```
+POST /auth/google/verify
+Content-Type: application/json
+```
+
+요청 예시:
+```json
+{
+  "id_token": "Google OAuth ID Token",
+  "email": "user@example.com",
+  "name": "사용자 이름"
+}
+```
+
+#### 사이트 관리
+
+```
+GET    /admin/sites         # 내 사이트 목록
+POST   /admin/sites         # 사이트 생성
+GET    /admin/sites/:id     # 사이트 상세
+PUT    /admin/sites/:id     # 사이트 수정
+DELETE /admin/sites/:id     # 사이트 삭제
+```
+
+#### 프로필
+
+```
+GET /admin/profile          # 내 프로필 조회
+```
+
+모든 Admin API 요청에는 `Authorization: Bearer {JWT_TOKEN}` 헤더가 필요합니다.
 
 ## 환경변수
 
