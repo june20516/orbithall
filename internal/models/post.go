@@ -21,6 +21,10 @@ type Post struct {
 	// 캐시 역할을 하며, 댓글 추가/삭제 시 업데이트됩니다
 	CommentCount int `json:"comment_count"`
 
+	// Admin용 추가 필드 (ListPostsBySite에서만 사용)
+	ActiveCommentCount  int `json:"active_comment_count,omitempty"`
+	DeletedCommentCount int `json:"deleted_comment_count,omitempty"`
+
 	// 메타데이터
 	ID        int64     `json:"id"`
 	CreatedAt time.Time `json:"created_at"`

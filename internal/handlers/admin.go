@@ -382,3 +382,223 @@ func (h *AdminHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(user)
 }
+
+// GetSiteStats는 특정 사이트의 통계를 반환합니다
+// @Summary      사이트 통계 조회
+// @Description  특정 사이트의 포스트 수, 댓글 수, 삭제된 댓글 수를 반환합니다
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id path int true "Site ID"
+// @Success      200 {object} models.SiteStats
+// @Failure      400 {string} string "Invalid site ID"
+// @Failure      403 {string} string "Forbidden"
+// @Failure      500 {string} string "Failed to get site stats"
+// @Security     BearerAuth
+// @Router       /admin/sites/{id}/stats [get]
+func (h *AdminHandler) GetSiteStats(w http.ResponseWriter, r *http.Request) {
+	// URL에서 site ID 추출
+	siteIDStr := chi.URLParam(r, "id")
+	siteID, err := strconv.ParseInt(siteIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid site ID", http.StatusBadRequest)
+		return
+	}
+
+	// Context에서 사용자 추출
+	user, ok := r.Context().Value(userContextKey).(*models.User)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// 사용자가 해당 사이트에 접근 권한이 있는지 확인
+	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, siteID)
+	if err != nil {
+		http.Error(w, "Failed to check site access", http.StatusInternalServerError)
+		return
+	}
+
+	if !hasAccess {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// 통계 조회
+	stats, err := database.GetSiteStats(r.Context(), h.db, siteID)
+	if err != nil {
+		http.Error(w, "Failed to get site stats", http.StatusInternalServerError)
+		return
+	}
+
+	// 응답 반환
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(stats)
+}
+
+// ListSitePosts는 특정 사이트의 포스트 목록을 반환합니다
+// @Summary      사이트 포스트 목록 조회
+// @Description  특정 사이트의 포스트 목록을 활성/삭제 댓글 수와 함께 반환합니다
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id path int true "Site ID"
+// @Success      200 {array} models.Post
+// @Failure      400 {string} string "Invalid site ID"
+// @Failure      403 {string} string "Forbidden"
+// @Failure      500 {string} string "Failed to get posts"
+// @Security     BearerAuth
+// @Router       /admin/sites/{id}/posts [get]
+func (h *AdminHandler) ListSitePosts(w http.ResponseWriter, r *http.Request) {
+	// URL에서 site ID 추출
+	siteIDStr := chi.URLParam(r, "id")
+	siteID, err := strconv.ParseInt(siteIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid site ID", http.StatusBadRequest)
+		return
+	}
+
+	// Context에서 사용자 추출
+	user, ok := r.Context().Value(userContextKey).(*models.User)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// 사용자가 해당 사이트에 접근 권한이 있는지 확인
+	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, siteID)
+	if err != nil {
+		http.Error(w, "Failed to check site access", http.StatusInternalServerError)
+		return
+	}
+
+	if !hasAccess {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// 포스트 목록 조회
+	posts, err := database.ListPostsBySite(r.Context(), h.db, siteID)
+	if err != nil {
+		http.Error(w, "Failed to get posts", http.StatusInternalServerError)
+		return
+	}
+
+	// 응답 반환
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(posts)
+}
+
+// GetPostComments는 특정 포스트의 댓글 목록을 반환합니다 (Admin용 - 삭제된 댓글 포함, 전체 IP)
+// @Summary      포스트 댓글 목록 조회
+// @Description  특정 포스트의 모든 댓글을 조회합니다. 삭제된 댓글도 포함하고 IP 주소는 마스킹하지 않습니다.
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        slug path string true "Post Slug"
+// @Param        site_id query int true "Site ID"
+// @Param        limit query int false "댓글 개수 (기본값: 50)"
+// @Param        offset query int false "오프셋 (기본값: 0)"
+// @Success      200 {object} object{comments=[]models.Comment,total=int}
+// @Failure      400 {string} string "Invalid parameters"
+// @Failure      403 {string} string "Forbidden"
+// @Failure      404 {string} string "Post not found"
+// @Failure      500 {string} string "Failed to get comments"
+// @Security     BearerAuth
+// @Router       /admin/posts/{slug}/comments [get]
+func (h *AdminHandler) GetPostComments(w http.ResponseWriter, r *http.Request) {
+	// URL에서 slug 추출
+	slug := chi.URLParam(r, "slug")
+	if slug == "" {
+		http.Error(w, "Post slug is required", http.StatusBadRequest)
+		return
+	}
+
+	// Query 파라미터에서 site_id 추출
+	siteIDStr := r.URL.Query().Get("site_id")
+	if siteIDStr == "" {
+		http.Error(w, "site_id query parameter is required", http.StatusBadRequest)
+		return
+	}
+	siteID, err := strconv.ParseInt(siteIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid site_id", http.StatusBadRequest)
+		return
+	}
+
+	// Context에서 사용자 추출
+	user, ok := r.Context().Value(userContextKey).(*models.User)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// 사용자가 해당 사이트에 접근 권한이 있는지 확인
+	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, siteID)
+	if err != nil {
+		http.Error(w, "Failed to check site access", http.StatusInternalServerError)
+		return
+	}
+
+	if !hasAccess {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// 포스트 조회
+	post, err := database.GetPostBySlug(r.Context(), h.db, siteID, slug)
+	if err != nil {
+		http.Error(w, "Failed to get post", http.StatusInternalServerError)
+		return
+	}
+	if post == nil {
+		http.Error(w, "Post not found", http.StatusNotFound)
+		return
+	}
+
+	// Query 파라미터에서 limit, offset 추출 (기본값: 50, 0)
+	limit := 50
+	offset := 0
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	// Admin용 댓글 조회 (삭제된 것 포함, IP 마스킹 없음)
+	comments, total, err := database.GetAdminComments(r.Context(), h.db, post.ID, limit, offset)
+	if err != nil {
+		http.Error(w, "Failed to get comments", http.StatusInternalServerError)
+		return
+	}
+
+	// Admin은 전체 IP와 마스킹된 IP 모두 볼 수 있음
+	for _, comment := range comments {
+		comment.IPAddressMasked = models.MaskIPAddress(comment.IPAddress)
+		comment.IPAddressUnmasked = comment.IPAddress
+		// 대댓글도 동일하게 처리
+		for _, reply := range comment.Replies {
+			reply.IPAddressMasked = models.MaskIPAddress(reply.IPAddress)
+			reply.IPAddressUnmasked = reply.IPAddress
+		}
+	}
+
+	// 응답 반환
+	response := map[string]interface{}{
+		"comments": comments,
+		"total":    total,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}

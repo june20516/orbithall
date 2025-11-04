@@ -57,9 +57,11 @@ services:
     volumes:
       - ./:/app
       - ./migrations:/migrations
-    # 컨테이너 시작 시 go.sum 생성 후 Air 실행
-    command: sh -c "go mod tidy && air -c .air.toml"
+      - go_bin:/go/bin  # Go 바이너리 영속성 (swag, air 등)
+    # 컨테이너 시작 시 swag이 없으면 설치, go.sum 생성 후 Air 실행
+    command: sh -c "test -f /go/bin/swag || go install github.com/swaggo/swag/cmd/swag@latest && go mod tidy && air -c .air.toml"
 
 # 볼륨 정의 (데이터 영속성을 위한 명명된 볼륨)
 volumes:
   postgres_data:
+  go_bin:

@@ -34,6 +34,13 @@ type Site struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// SiteStats는 사이트의 통계 정보를 나타냅니다
+type SiteStats struct {
+	PostCount           int `json:"post_count"`
+	CommentCount        int `json:"comment_count"`
+	DeletedCommentCount int `json:"deleted_comment_count"`
+}
+
 // GenerateAPIKey는 주어진 prefix로 API 키를 생성합니다
 //
 // prefix 종류:
