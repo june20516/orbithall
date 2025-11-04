@@ -26,13 +26,13 @@ import (
 // @termsOfService  https://orbithall.onrender.com/terms
 
 // @contact.name   API Support
-// @contact.email  support@orbithall.com
+// @contact.email  june20516@gmail.com
 
 // @license.name  MIT
 // @license.url   https://opensource.org/licenses/MIT
 
-// @host      localhost:8080
 // @BasePath  /
+// @schemes   https http
 
 // @securityDefinitions.apikey ApiKeyAuth
 // @in header
@@ -174,14 +174,25 @@ func run() error {
 		r.Get("/sites/{id}", adminHandler.GetSite)
 		r.Put("/sites/{id}", adminHandler.UpdateSite)
 		r.Delete("/sites/{id}", adminHandler.DeleteSite)
+
+		// 사이트 통계 및 컨텐츠 조회 (016)
+		r.Get("/sites/{id}/stats", adminHandler.GetSiteStats)
+		r.Get("/sites/{id}/posts", adminHandler.ListSitePosts)
+		r.Get("/posts/{slug}/comments", adminHandler.GetPostComments)
 	})
 
 	// ============================================
-	// Swagger UI
+	// API 문서 (OpenAPI/Swagger)
 	// ============================================
-	// OpenAPI 3.0 문서 및 인터랙티브 API 테스트 UI
-	r.Get("/swagger/*", httpSwagger.Handler(
-		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+	// Swagger 2.0 문서 및 인터랙티브 API 테스트 UI
+	// 환경에 따라 동적으로 URL 설정
+	docsURL := os.Getenv("DOCS_URL")
+	if docsURL == "" {
+		// 기본값: 상대 경로 사용 (현재 호스트 기준)
+		docsURL = "/docs/doc.json"
+	}
+	r.Get("/docs/*", httpSwagger.Handler(
+		httpSwagger.URL(docsURL),
 	))
 
 	// ============================================

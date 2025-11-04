@@ -149,3 +149,70 @@ func DecrementCommentCount(ctx context.Context, db DBTX, postID int64) error {
 
 	return nil
 }
+
+// ListPostsBySite는 사이트별 Post 목록을 조회합니다
+// Admin용으로 각 Post별 활성/삭제 댓글 수를 포함합니다
+// 최신 댓글 순으로 정렬됩니다
+func ListPostsBySite(ctx context.Context, db DBTX, siteID int64) ([]*models.Post, error) {
+	query := `
+		SELECT
+			p.id,
+			p.site_id,
+			p.slug,
+			p.title,
+			p.comment_count,
+			p.created_at,
+			p.updated_at,
+			COUNT(c.id) as total_comments,
+			COUNT(CASE WHEN c.is_deleted = false THEN 1 END) as active_comments,
+			COUNT(CASE WHEN c.is_deleted = true THEN 1 END) as deleted_comments,
+			MAX(c.created_at) as last_comment_at
+		FROM posts p
+		LEFT JOIN comments c ON c.post_id = p.id
+		WHERE p.site_id = $1
+		GROUP BY p.id, p.site_id, p.slug, p.title, p.comment_count, p.created_at, p.updated_at
+		ORDER BY last_comment_at DESC NULLS LAST, p.created_at DESC
+	`
+
+	rows, err := db.QueryContext(ctx, query, siteID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list posts: %w", err)
+	}
+	defer rows.Close()
+
+	var posts []*models.Post
+	for rows.Next() {
+		post := &models.Post{}
+		var totalComments int
+		var lastCommentAt sql.NullTime
+
+		err := rows.Scan(
+			&post.ID,
+			&post.SiteID,
+			&post.Slug,
+			&post.Title,
+			&post.CommentCount,
+			&post.CreatedAt,
+			&post.UpdatedAt,
+			&totalComments,
+			&post.ActiveCommentCount,
+			&post.DeletedCommentCount,
+			&lastCommentAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan post: %w", err)
+		}
+
+		// CommentCount를 실제 총 댓글 수로 업데이트
+		post.CommentCount = totalComments
+
+		posts = append(posts, post)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating posts: %w", err)
+	}
+
+	return posts, nil
+}
+

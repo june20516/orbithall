@@ -135,3 +135,30 @@ func DeleteSite(ctx context.Context, db DBTX, siteID int64) error {
 
 	return nil
 }
+
+// GetSiteStats는 사이트의 통계 정보를 조회합니다
+// Post 수, 활성 댓글 수, 삭제된 댓글 수를 반환합니다
+func GetSiteStats(ctx context.Context, db DBTX, siteID int64) (*models.SiteStats, error) {
+	query := `
+		SELECT
+			COUNT(DISTINCT p.id) as post_count,
+			COUNT(CASE WHEN c.is_deleted = false THEN 1 END) as comment_count,
+			COUNT(CASE WHEN c.is_deleted = true THEN 1 END) as deleted_comment_count
+		FROM posts p
+		LEFT JOIN comments c ON c.post_id = p.id
+		WHERE p.site_id = $1
+	`
+
+	stats := &models.SiteStats{}
+	err := db.QueryRowContext(ctx, query, siteID).Scan(
+		&stats.PostCount,
+		&stats.CommentCount,
+		&stats.DeletedCommentCount,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get site stats: %w", err)
+	}
+
+	return stats, nil
+}
+

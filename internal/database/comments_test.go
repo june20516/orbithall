@@ -6,6 +6,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/june20516/orbithall/internal/models"
 	"github.com/june20516/orbithall/internal/testhelpers"
 )
 
@@ -584,6 +585,122 @@ func TestListComments(t *testing.T) {
 		}
 		if total != 0 {
 			t.Errorf("expected total=0, got %d", total)
+		}
+	})
+}
+
+// TestGetAdminComments는 Admin용 댓글 조회 기능을 테스트합니다
+func TestGetAdminComments(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer Close(db)
+
+	t.Run("Admin 댓글 조회 성공 - 삭제된 댓글 포함, IP 마스킹 없음", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// 테스트 사이트 및 Post 생성
+		site := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "test.com",
+			[]string{"https://test.com"}, true)
+		post := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "test-post", "Test Post")
+
+		// 정상 댓글 2개 생성
+		comment1, err := CreateComment(ctx, tx, post.ID, nil, "Author1", "password123",
+			"Active comment 1", "192.168.1.100", "test-agent")
+		if err != nil {
+			t.Fatalf("Failed to create comment1: %v", err)
+		}
+
+		comment2, err := CreateComment(ctx, tx, post.ID, nil, "Author2", "password123",
+			"Active comment 2", "192.168.1.200", "test-agent")
+		if err != nil {
+			t.Fatalf("Failed to create comment2: %v", err)
+		}
+
+		// 댓글 1개 삭제
+		err = DeleteComment(ctx, tx, comment1.ID)
+		if err != nil {
+			t.Fatalf("Failed to delete comment: %v", err)
+		}
+
+		// 대댓글 추가 (정상)
+		_, err = CreateComment(ctx, tx, post.ID, &comment2.ID, "ReplyAuthor", "password123",
+			"Reply to comment2", "192.168.1.150", "test-agent")
+		if err != nil {
+			t.Fatalf("Failed to create reply: %v", err)
+		}
+
+		// Admin 댓글 조회
+		comments, total, err := GetAdminComments(ctx, tx, post.ID, 50, 0)
+		if err != nil {
+			t.Fatalf("Failed to get admin comments: %v", err)
+		}
+
+		// 검증
+		if total != 2 {
+			t.Errorf("Expected total 2 (including deleted), got %d", total)
+		}
+
+		if len(comments) != 2 {
+			t.Fatalf("Expected 2 comments, got %d", len(comments))
+		}
+
+		// 삭제된 댓글 확인
+		var deletedComment *models.Comment
+		var activeComment *models.Comment
+		for _, c := range comments {
+			if c.IsDeleted {
+				deletedComment = c
+			} else {
+				activeComment = c
+			}
+		}
+
+		if deletedComment == nil {
+			t.Error("Expected to find deleted comment")
+		} else {
+			// IP 마스킹 없이 전체 IP 확인
+			if deletedComment.IPAddress != "192.168.1.100" {
+				t.Errorf("Expected full IP 192.168.1.100, got %s", deletedComment.IPAddress)
+			}
+		}
+
+		if activeComment == nil {
+			t.Error("Expected to find active comment")
+		} else {
+			// 대댓글 확인
+			if len(activeComment.Replies) != 1 {
+				t.Errorf("Expected 1 reply, got %d", len(activeComment.Replies))
+			} else {
+				// 대댓글의 IP도 마스킹 없이 확인
+				if activeComment.Replies[0].IPAddress != "192.168.1.150" {
+					t.Errorf("Expected full IP 192.168.1.150, got %s", activeComment.Replies[0].IPAddress)
+				}
+			}
+		}
+	})
+
+	t.Run("Admin 댓글 조회 성공 - 댓글이 없는 경우", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// 테스트 사이트 및 Post 생성 (댓글 없음)
+		site := testhelpers.CreateTestSite(ctx, t, tx, "Empty Site", "empty.com",
+			[]string{"https://empty.com"}, true)
+		post := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "empty-post", "Empty Post")
+
+		// Admin 댓글 조회
+		comments, total, err := GetAdminComments(ctx, tx, post.ID, 50, 0)
+		if err != nil {
+			t.Fatalf("Failed to get admin comments: %v", err)
+		}
+
+		// 검증
+		if total != 0 {
+			t.Errorf("Expected total 0, got %d", total)
+		}
+
+		if len(comments) != 0 {
+			t.Errorf("Expected 0 comments, got %d", len(comments))
 		}
 	})
 }

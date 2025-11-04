@@ -272,3 +272,117 @@ func getReplies(ctx context.Context, db DBTX, parentID int64) ([]*models.Comment
 
 	return replies, nil
 }
+
+// GetAdminComments는 Admin용 댓글 조회 함수입니다
+// 일반 ListComments와 달리 삭제된 댓글도 포함하며, IP 마스킹을 하지 않습니다
+func GetAdminComments(ctx context.Context, db DBTX, postID int64, limit, offset int) ([]*models.Comment, int, error) {
+	// 1단계: 최상위 댓글 총 개수 조회 (삭제된 것 포함)
+	var total int
+	err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM comments
+		WHERE post_id = $1 AND parent_id IS NULL
+	`, postID).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count comments: %w", err)
+	}
+
+	// 2단계: 최상위 댓글 조회 (페이지네이션, 삭제된 것 포함)
+	query := `
+		SELECT id, post_id, parent_id, author_name, author_password, content, ip_address, user_agent, is_deleted, created_at, updated_at, deleted_at
+		FROM comments
+		WHERE post_id = $1 AND parent_id IS NULL
+		ORDER BY created_at ASC, id ASC
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := db.QueryContext(ctx, query, postID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query comments: %w", err)
+	}
+	defer rows.Close()
+
+	var comments []*models.Comment
+	for rows.Next() {
+		var comment models.Comment
+		err := rows.Scan(
+			&comment.ID,
+			&comment.PostID,
+			&comment.ParentID,
+			&comment.AuthorName,
+			&comment.AuthorPassword,
+			&comment.Content,
+			&comment.IPAddress, // Admin은 전체 IP 확인 가능
+			&comment.UserAgent,
+			&comment.IsDeleted,
+			&comment.CreatedAt,
+			&comment.UpdatedAt,
+			&comment.DeletedAt,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan comment: %w", err)
+		}
+		comments = append(comments, &comment)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	// 3단계: 각 최상위 댓글의 대댓글 조회 (삭제된 것 포함)
+	for _, comment := range comments {
+		replies, err := getAdminReplies(ctx, db, comment.ID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to get replies for comment %d: %w", comment.ID, err)
+		}
+		comment.Replies = replies
+	}
+
+	return comments, total, nil
+}
+
+// getAdminReplies는 Admin용 대댓글 조회 (삭제된 것 포함, IP 마스킹 없음)
+func getAdminReplies(ctx context.Context, db DBTX, parentID int64) ([]*models.Comment, error) {
+	query := `
+		SELECT id, post_id, parent_id, author_name, author_password, content, ip_address, user_agent, is_deleted, created_at, updated_at, deleted_at
+		FROM comments
+		WHERE parent_id = $1
+		ORDER BY created_at ASC, id ASC
+	`
+
+	rows, err := db.QueryContext(ctx, query, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query replies: %w", err)
+	}
+	defer rows.Close()
+
+	var replies []*models.Comment
+	for rows.Next() {
+		var reply models.Comment
+		err := rows.Scan(
+			&reply.ID,
+			&reply.PostID,
+			&reply.ParentID,
+			&reply.AuthorName,
+			&reply.AuthorPassword,
+			&reply.Content,
+			&reply.IPAddress, // Admin은 전체 IP 확인 가능
+			&reply.UserAgent,
+			&reply.IsDeleted,
+			&reply.CreatedAt,
+			&reply.UpdatedAt,
+			&reply.DeletedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan reply: %w", err)
+		}
+		replies = append(replies, &reply)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	return replies, nil
+}
+
