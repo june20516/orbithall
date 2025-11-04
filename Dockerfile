@@ -32,11 +32,11 @@ RUN go mod download
 # 전체 소스 코드 복사
 COPY . .
 
+# Swagger 문서 생성
+RUN swag init -g cmd/api/main.go --output ./docs
+
 # go.sum 파일 생성/업데이트 (실행 전 필수)
 RUN go mod tidy
-
-# Swagger 문서 생성 (OpenAPI 3.0 스펙)
-RUN swag init -g cmd/api/main.go --output ./docs
 
 # 마이그레이션 파일 복사
 COPY migrations /migrations
@@ -61,6 +61,9 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
+# git 설치 (go mod tidy가 의존성 처리를 위해 필요)
+RUN apk add --no-cache git
+
 # Swag 설치 (OpenAPI 문서 생성 도구)
 RUN go install github.com/swaggo/swag/cmd/swag@latest
 
@@ -74,11 +77,11 @@ RUN go mod download
 # 전체 소스 코드 복사
 COPY . .
 
-# go.sum 파일 생성/업데이트 (빌드 전 필수)
-RUN go mod tidy
-
 # Swagger 문서 생성 (OpenAPI 3.0 스펙)
 RUN swag init -g cmd/api/main.go --output ./docs
+
+# go.sum 파일 생성/업데이트 (빌드 전 필수)
+RUN go mod tidy
 
 # 정적 바이너리 빌드 (CGO 비활성화로 다른 의존성 없이 실행 가능)
 # GOOS=linux: Linux용 바이너리 생성
