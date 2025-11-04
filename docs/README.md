@@ -21,6 +21,7 @@ docs/
 ## 작업 프로세스
 
 ### 1. 기능 명세 작성 (선택)
+
 큰 기능을 개발할 때는 먼저 명세서를 작성합니다.
 
 ```bash
@@ -34,6 +35,7 @@ cp docs/templates/spec.md docs/specs/[기능명].md
 ```
 
 ### 2. 작업 문서 작성
+
 모든 개발 작업은 작업 문서를 먼저 작성합니다.
 
 ```bash
@@ -49,6 +51,7 @@ cp docs/templates/task.md docs/tasks/pending/[작업명].md
 ```
 
 ### 3. 작업 시작
+
 작업을 시작할 때 문서를 active로 이동합니다.
 
 ```bash
@@ -56,15 +59,18 @@ mv docs/tasks/pending/[작업명].md docs/tasks/active/[작업명].md
 ```
 
 ### 4. Claude가 문서를 읽고 코딩
+
 Claude에게 작업 문서를 전달하고, 문서에 명시된 내용을 준수하여 코딩하도록 요청합니다.
 
 **요청 예시**:
+
 ```
 docs/tasks/active/댓글-CRUD-API.md 문서를 읽고,
 명세된 내용대로 구현해줘.
 ```
 
 ### 5. 작업 완료
+
 작업이 완료되면 문서에 완료 기록을 남기고 completed로 이동합니다.
 
 ```bash
@@ -79,33 +85,32 @@ mv docs/tasks/active/[작업명].md docs/tasks/completed/[작업명].md
 ## 문서 작성 규칙
 
 ### 파일명 규칙
+
 - 소문자 사용
 - 하이픈(-)으로 단어 구분
 - 명확하고 간결한 이름
 - 예: `comment-crud-api.md`, `rate-limiting.md`
 
 ### 내용 작성 규칙
-1. **구체적으로 작성**
-   - 추상적인 표현보다 구체적인 예시
-   - 코드 스니펫 포함
-   - 명확한 입출력 정의
 
-2. **완전하게 작성**
+1. **완전하게 작성**
+
    - 모든 엣지 케이스 고려
-   - 에러 처리 방법 명시
-   - 검증 방법 포함
+   - 에러 처리 고려
 
-3. **실행 가능하게 작성**
-   - Claude가 바로 코딩할 수 있을 정도로 상세히
+2. **실행 가능하게 작성**
+
    - 단계별로 명확히 구분
    - 의존성 명시
 
 ## 템플릿 사용 가이드
 
 ### task.md (작업 문서)
+
 **언제 사용**: 모든 개발 작업 (필수)
 
 **주요 섹션**:
+
 - 작업 개요: 무엇을 하는지
 - 작업 범위: 무엇을 포함하고 제외하는지
 - 기술적 접근: 어떻게 구현할지
@@ -113,21 +118,25 @@ mv docs/tasks/active/[작업명].md docs/tasks/completed/[작업명].md
 - 검증 방법: 어떻게 확인할지
 
 **작성 팁**:
+
 - 구현 단계는 10단계 이내로
 - 각 단계는 독립적으로 실행 가능하게
 - 검증 방법은 구체적인 명령어/테스트 포함
 
 ### spec.md (기능 명세)
+
 **언제 사용**: 큰 기능 개발 시 (선택)
 
 **주요 섹션**:
+
 - 개요: 기능의 전체 그림
 - 기능 요구사항: 필수/선택 기능 목록
 - 데이터 모델: 엔티티 정의
-- API 명세: 엔드포인트 상세
+- API 명세: 시그니처와 로직 흐름
 - 테스트 시나리오: 정상/예외/엣지 케이스
 
 **작성 팁**:
+
 - API 요청/응답 예시 필수
 - 모든 에러 코드 정의
 - 데이터 타입 명확히 명시
@@ -135,11 +144,13 @@ mv docs/tasks/active/[작업명].md docs/tasks/completed/[작업명].md
 ## Claude에게 작업 지시하는 방법
 
 ### 기본 패턴
+
 ```
 [작업 문서 경로]를 읽고, 명세대로 구현해줘.
 ```
 
 ### 세부 지시 패턴
+
 ```
 [작업 문서 경로]를 읽고:
 1. 구현 단계 1-3까지만 먼저 해줘
@@ -147,6 +158,7 @@ mv docs/tasks/active/[작업명].md docs/tasks/completed/[작업명].md
 ```
 
 ### 검증 요청 패턴
+
 ```
 [작업 문서 경로]의 검증 방법대로 테스트해줘.
 ```
@@ -154,11 +166,13 @@ mv docs/tasks/active/[작업명].md docs/tasks/completed/[작업명].md
 ## 문서 버전 관리
 
 ### Git 커밋
+
 - 작업 문서 작성 시: `docs: Add task for [작업명]`
 - 작업 완료 시: `docs: Complete task for [작업명]`
 - 명세서 작성 시: `docs: Add spec for [기능명]`
 
 ### 문서 수정
+
 - 작업 중 요구사항 변경 시 문서 먼저 수정
 - 변경 이력을 문서 하단에 기록
 - Git 커밋으로 변경 추적
@@ -168,29 +182,34 @@ mv docs/tasks/active/[작업명].md docs/tasks/completed/[작업명].md
 ### 상황: 댓글 CRUD API 구현
 
 **1단계: 명세서 작성 (선택)**
+
 ```bash
 cp docs/templates/spec.md docs/specs/comment-api.md
 # 명세서 작성: API 엔드포인트, 데이터 모델 등
 ```
 
 **2단계: 작업 문서 작성**
+
 ```bash
 cp docs/templates/task.md docs/tasks/pending/comment-crud-api.md
 # 작업 문서 작성: 구현 단계, 파일 구조 등
 ```
 
 **3단계: 작업 시작**
+
 ```bash
 mv docs/tasks/pending/comment-crud-api.md docs/tasks/active/
 ```
 
 **4단계: Claude에게 지시**
+
 ```
 docs/tasks/active/comment-crud-api.md를 읽고,
 명세대로 댓글 CRUD API를 구현해줘.
 ```
 
 **5단계: 완료 및 아카이브**
+
 ```bash
 # 문서에 완료 내역 기록
 mv docs/tasks/active/comment-crud-api.md docs/tasks/completed/
@@ -199,16 +218,19 @@ mv docs/tasks/active/comment-crud-api.md docs/tasks/completed/
 ## 주의사항
 
 ### 문서 작성 시
+
 - 템플릿의 모든 섹션을 채울 필요는 없음 (관련 없는 섹션 삭제 가능)
 - 하지만 핵심 섹션(개요, 범위, 구현 단계)은 필수
 - 불확실한 부분도 명시 (Claude가 제안하도록)
 
 ### Claude 작업 시
+
 - 문서에 명시된 내용 우선
 - 문서와 충돌하는 경우 사용자에게 확인
 - 문서에 없는 내용은 보수적으로 판단
 
 ### 문서 유지보수
+
 - 완료된 작업 문서는 삭제하지 않고 보관
 - 향후 유사 작업 시 참고 자료로 활용
 - 주기적으로 템플릿 개선

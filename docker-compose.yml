@@ -56,6 +56,7 @@ services:
     # 로컬 파일 변경을 컨테이너에 실시간 반영 (hot reload용)
     volumes:
       - ./:/app
+      - ./migrations:/migrations
     # 컨테이너 시작 시 go.sum 생성 후 Air 실행
     command: sh -c "go mod tidy && air -c .air.toml"
 
