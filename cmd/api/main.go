@@ -56,6 +56,7 @@ func run() error {
 	// ============================================
 	commentHandler := handlers.NewCommentHandler(db)
 	authHandler := handlers.NewAuthHandler(db)
+	adminHandler := handlers.NewAdminHandler(db)
 
 	// ============================================
 	// Rate Limiter 초기화
@@ -137,10 +138,15 @@ func run() error {
 		// JWT 인증 미들웨어 적용 (모든 Admin 요청은 JWT 토큰 필요)
 		r.Use(handlers.JWTAuthMiddleware(db))
 
-		// Admin 엔드포인트는 작업 012에서 구현 예정
-		// 예시:
-		// r.Get("/sites", adminHandler.ListSites)
-		// r.Post("/sites", adminHandler.CreateSite)
+		// 프로필 조회
+		r.Get("/profile", adminHandler.GetProfile)
+
+		// 사이트 관리
+		r.Get("/sites", adminHandler.ListSites)
+		r.Post("/sites", adminHandler.CreateSite)
+		r.Get("/sites/{id}", adminHandler.GetSite)
+		r.Put("/sites/{id}", adminHandler.UpdateSite)
+		r.Delete("/sites/{id}", adminHandler.DeleteSite)
 	})
 
 	// ============================================

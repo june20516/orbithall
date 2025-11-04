@@ -140,9 +140,9 @@ func RemoveUserFromSite(ctx context.Context, db DBTX, userID, siteID int64) erro
 	return nil
 }
 
-// IsUserSiteOwner는 사용자가 사이트의 소유자인지 확인합니다
+// HasUserSiteAccess는 사용자가 사이트에 접근 권한이 있는지 확인합니다
 // role = 'owner'인 경우에만 true 반환
-func IsUserSiteOwner(ctx context.Context, db DBTX, userID, siteID int64) (bool, error) {
+func HasUserSiteAccess(ctx context.Context, db DBTX, userID, siteID int64) (bool, error) {
 	query := `
 		SELECT EXISTS(
 			SELECT 1 FROM user_sites

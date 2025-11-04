@@ -1,7 +1,10 @@
-# Admin API 엔드포인트 구현
+# [WIP] Admin API 엔드포인트 구현
 
 ## 작성일
 2025-10-29
+
+## 시작일
+2025-11-04
 
 ## 우선순위
 - [x] 긴급
@@ -11,6 +14,85 @@
 
 ## 작업 개요
 Admin 페이지에서 사용할 Site 관리 API 엔드포인트 구현. JWT 인증된 사용자가 자신의 사이트를 조회/수정/삭제할 수 있도록 TDD 방식으로 개발.
+
+## 작업 완료 체크리스트
+
+### 1. Site 입력 검증 구현 (TDD) ✅
+- [x] `internal/validators/site.go` 생성
+  - [x] `SiteCreateInput` 구조체
+  - [x] `SiteUpdateInput` 구조체
+  - [x] `Validate()` 메서드 (생성)
+  - [x] `Validate()` 메서드 (수정)
+- [x] `internal/validators/site_test.go` 생성
+  - [x] 생성 검증 테스트 (name 필수, domain 필수, cors_origins 형식) - 12개 케이스
+  - [x] 수정 검증 테스트 (선택 필드 검증) - 11개 케이스
+- [x] 테스트 실행 및 통과 확인 (23개 테스트 모두 통과)
+
+### 2. Database 메서드 추가 ✅
+- [x] `internal/database/sites.go` 확인 및 추가
+  - [x] `GetSiteByID()` 구현 (ID로 사이트 조회)
+  - [x] `UpdateSite()` 구현 (name, cors_origins, is_active 수정)
+  - [x] `DeleteSite()` 구현 (CASCADE 삭제)
+- [x] Database 메서드 테스트 작성
+  - [x] `TestGetSiteByID` (조회 성공/실패)
+  - [x] `TestUpdateSite` (수정 성공/실패)
+  - [x] `TestDeleteSite` (삭제 성공/실패)
+
+### 3. Admin 핸들러 구현 (TDD) ✅
+- [x] `internal/handlers/admin_test.go` 생성
+  - [x] `TestListSites` (성공 케이스 2개)
+  - [x] `TestGetSite` (성공 / 권한 없음 / 존재하지 않음)
+  - [x] `TestCreateSite` (성공 / 입력 오류)
+  - [x] `TestUpdateSite` (성공 / 권한 없음)
+  - [x] `TestDeleteSite` (성공 / 권한 없음)
+  - [x] `TestGetProfile` (성공)
+- [x] `internal/handlers/admin.go` 구현
+  - [x] `AdminHandler` 구조체
+  - [x] `NewAdminHandler()` 생성자
+  - [x] `ListSites()` - GET /admin/sites
+  - [x] `GetSite()` - GET /admin/sites/:id
+  - [x] `CreateSite()` - POST /admin/sites
+  - [x] `UpdateSite()` - PUT /admin/sites/:id
+  - [x] `DeleteSite()` - DELETE /admin/sites/:id
+  - [x] `GetProfile()` - GET /admin/profile
+- [x] 모든 핸들러 테스트 통과 확인 (13개 테스트 통과)
+- [x] 네이밍 개선: `IsUserSiteOwner` → `HasUserSiteAccess`
+- [x] Pending 작업 추가: 013-domain-ownership-verification.md
+- [x] Pending 작업 추가: 014-site-manager-role.md
+
+### 4. 라우팅 설정 ✅
+- [x] `cmd/api/main.go` 수정
+  - [x] `AdminHandler` 초기화
+  - [x] `/admin` 그룹에 6개 엔드포인트 등록
+- [x] 빌드 확인
+
+### 5. OpenAPI 3.0 스펙 문서 생성
+- [ ] Swagger 라이브러리 설치
+  - [ ] `swag` CLI 설치
+  - [ ] `http-swagger` 패키지 추가
+- [ ] `cmd/api/main.go`에 메타데이터 주석 추가
+- [ ] 각 핸들러에 Swagger 주석 추가 (6개 엔드포인트)
+- [ ] `swag init` 실행하여 문서 생성
+- [ ] Swagger UI 라우팅 추가 (`/swagger/*`)
+- [ ] Swagger UI 접속 확인 (http://localhost:8080/swagger/index.html)
+
+### 6. 통합 테스트
+- [ ] 모든 유닛 테스트 실행 (`go test ./...`)
+- [ ] API 수동 테스트
+  - [ ] JWT 발급
+  - [ ] GET /admin/sites (사이트 목록)
+  - [ ] POST /admin/sites (사이트 생성)
+  - [ ] GET /admin/sites/:id (사이트 상세)
+  - [ ] PUT /admin/sites/:id (사이트 수정)
+  - [ ] DELETE /admin/sites/:id (사이트 삭제)
+  - [ ] GET /admin/profile (프로필 조회)
+  - [ ] 소유하지 않은 사이트 접근 시 403/404 확인
+- [ ] Swagger UI에서 "Try it out" 기능 테스트
+
+### 7. 문서화 및 정리
+- [ ] README.md 업데이트 (새로운 Admin API 엔드포인트 추가)
+- [ ] 작업 문서를 `completed/`로 이동
+- [ ] 커밋 및 PR 생성
 
 ## 작업 목적
 - Admin 사용자가 자신이 소유한 사이트를 관리할 수 있는 API 제공

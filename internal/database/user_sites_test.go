@@ -37,7 +37,7 @@ func TestAddUserToSite(t *testing.T) {
 		}
 
 		// 연결 확인
-		isOwner, err := IsUserSiteOwner(ctx, tx, user.ID, site.ID)
+		isOwner, err := HasUserSiteAccess(ctx, tx, user.ID, site.ID)
 		if err != nil {
 			t.Fatalf("Failed to check ownership: %v", err)
 		}
@@ -236,7 +236,7 @@ func TestRemoveUserFromSite(t *testing.T) {
 		}
 
 		// 소유자 확인 (false)
-		isOwner, err := IsUserSiteOwner(ctx, tx, user.ID, site.ID)
+		isOwner, err := HasUserSiteAccess(ctx, tx, user.ID, site.ID)
 		if err != nil {
 			t.Fatalf("Failed to check ownership: %v", err)
 		}
@@ -246,8 +246,8 @@ func TestRemoveUserFromSite(t *testing.T) {
 	})
 }
 
-// TestIsUserSiteOwner는 사용자가 사이트 소유자인지 확인하는 기능을 테스트합니다
-func TestIsUserSiteOwner(t *testing.T) {
+// TestHasUserSiteAccess는 사용자가 사이트 소유자인지 확인하는 기능을 테스트합니다
+func TestHasUserSiteAccess(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer Close(db)
 
@@ -272,7 +272,7 @@ func TestIsUserSiteOwner(t *testing.T) {
 		}
 
 		// 소유자 확인
-		isOwner, err := IsUserSiteOwner(ctx, tx, user.ID, site.ID)
+		isOwner, err := HasUserSiteAccess(ctx, tx, user.ID, site.ID)
 		if err != nil {
 			t.Fatalf("Failed to check ownership: %v", err)
 		}
@@ -299,7 +299,7 @@ func TestIsUserSiteOwner(t *testing.T) {
 		site := testhelpers.CreateTestSite(ctx, t, tx, "Not Owner Site", "notowner.com", []string{"https://notowner.com"}, true)
 
 		// 소유자 확인 (false)
-		isOwner, err := IsUserSiteOwner(ctx, tx, user.ID, site.ID)
+		isOwner, err := HasUserSiteAccess(ctx, tx, user.ID, site.ID)
 		if err != nil {
 			t.Fatalf("Failed to check ownership: %v", err)
 		}
