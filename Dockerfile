@@ -61,6 +61,9 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
+# git 설치 (go mod tidy가 의존성 처리를 위해 필요)
+RUN apk add --no-cache git
+
 # Swag 설치 (OpenAPI 문서 생성 도구)
 RUN go install github.com/swaggo/swag/cmd/swag@latest
 
