@@ -1,4 +1,4 @@
-# Site-User 연결 로직 구현
+# [DONE] Site-User 연결 로직 구현
 
 ## 작성일
 2025-10-29
@@ -11,6 +11,35 @@
 
 ## 작업 개요
 User와 Site의 다대다 관계를 관리하는 Repository 구현. 사용자가 여러 사이트를 소유하고 관리할 수 있도록 `user_sites` 테이블 CRUD 로직을 TDD 방식으로 개발.
+
+## 체크리스트
+
+### 1단계: User-Site Repository 테스트 작성
+- [x] `internal/database/user_sites_test.go` 생성
+  - [x] TestAddUserToSite (성공, 중복 방지)
+  - [x] TestGetUserSites (사용자의 사이트 목록 조회)
+  - [x] TestGetSiteUsers (사이트의 사용자 목록 조회)
+  - [x] TestRemoveUserFromSite (연결 해제)
+  - [x] TestIsUserSiteOwner (소유자 확인)
+
+### 2단계: User-Site Repository 구현
+- [x] `internal/database/user_sites.go` 생성
+  - [x] `AddUserToSite()` 함수 구현
+  - [x] `GetUserSites()` 함수 구현
+  - [x] `GetSiteUsers()` 함수 구현
+  - [x] `RemoveUserFromSite()` 함수 구현
+  - [x] `IsUserSiteOwner()` 함수 구현
+
+### 3단계: Site 생성 로직 확장
+- [x] `internal/database/sites.go` 생성
+  - [x] `CreateSiteForUser()` 함수 구현
+- [x] `internal/database/sites_test.go` 생성
+  - [x] TestCreateSiteForUser (사이트 생성 및 사용자 연결)
+
+### 4단계: 테스트 실행 및 검증
+- [x] User-Site Repository 테스트 전체 통과 (8개 테스트 케이스)
+- [x] Site 생성 로직 테스트 통과 (3개 테스트 케이스)
+- [x] 전체 테스트 실행 및 통과 확인 (모든 패키지)
 
 ## 작업 목적
 - Admin 사용자가 자신이 소유한 사이트 목록을 조회할 수 있도록 함
@@ -195,3 +224,17 @@ INSERT INTO user_sites (user_id, site_id, role) VALUES (1, 1, 'owner');
 ### [2025-10-29] 작업 문서 작성
 - User-Site 다대다 관계 Repository 설계
 - Site 생성 시 자동 연결 로직
+
+### [2025-11-04] 작업 완료
+- User-Site Repository 구현 완료 (TDD 방식)
+  - AddUserToSite: 사용자-사이트 연결 (복합 PK로 중복 방지)
+  - GetUserSites: 사용자의 사이트 목록 조회 (JOIN 쿼리)
+  - GetSiteUsers: 사이트의 사용자 목록 조회
+  - RemoveUserFromSite: 연결 해제
+  - IsUserSiteOwner: 소유자 확인
+- Site 생성 로직 확장 완료
+  - CreateSiteForUser: 사이트 생성 및 사용자 자동 연결
+  - API Key 자동 생성 (orb_live_ prefix)
+  - 트랜잭션으로 원자성 보장
+- 전체 테스트 통과 (11개 새 테스트 케이스 추가)
+- 실제 소요 시간: 약 1시간

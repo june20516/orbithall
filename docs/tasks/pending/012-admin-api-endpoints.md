@@ -35,12 +35,20 @@ Admin 페이지에서 사용할 Site 관리 API 엔드포인트 구현. JWT 인�
 - 사이트 통계/분석 (추후)
 - 사용자 프로필 수정 (추후)
 
+### 추가 사항
+- **OpenAPI 3.0 스펙 문서 생성**
+  - swaggo/swag 사용
+  - 모든 API 엔드포인트에 주석 추가
+  - Swagger UI 제공 (`/swagger/index.html`)
+
 ## 기술적 접근
 
 ### 사용할 기술/라이브러리
 - **Chi 라우터**: 이미 사용 중
 - **database/sql**: 기존 방식 유지
 - **작업 010의 JWTAuthMiddleware**: Context에서 사용자 추출
+- **swaggo/swag**: OpenAPI 3.0 스펙 문서 자동 생성
+- **swaggo/http-swagger**: Swagger UI 제공
 
 ### 파일 구조
 ```
@@ -52,8 +60,12 @@ orbithall/
 │   └── validators/
 │       ├── site.go
 │       └── site_test.go
-└── cmd/api/
-    └── main.go
+├── cmd/api/
+│   └── main.go
+└── docs/              # swag init으로 자동 생성
+    ├── docs.go
+    ├── swagger.json
+    └── swagger.yaml
 ```
 
 ## API 명세
@@ -276,6 +288,72 @@ orbithall/
 
 ---
 
+### 5. OpenAPI 3.0 스펙 문서 생성
+
+**설치**:
+```bash
+go install github.com/swaggo/swag/cmd/swag@latest
+go get -u github.com/swaggo/http-swagger/v2
+```
+
+**main.go에 메타데이터 주석 추가**:
+```go
+// @title           Orbithall API
+// @version         1.0
+// @description     임베드형 댓글 시스템 API
+// @host            localhost:8080
+// @BasePath        /
+// @schemes         http https
+
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name X-Orbithall-API-Key
+// @description API Key for widget access
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token
+```
+
+**각 핸들러에 Swagger 주석 추가**:
+```go
+// @Summary      내 사이트 목록 조회
+// @Description  JWT 인증된 사용자의 사이트 목록을 반환합니다
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Success      200 {object} ListSitesResponse
+// @Failure      401 {object} ErrorResponse
+// @Security     BearerAuth
+// @Router       /admin/sites [get]
+func (h *AdminHandler) ListSites(w http.ResponseWriter, r *http.Request) {
+    // ...
+}
+```
+
+**문서 생성**:
+```bash
+swag init -g cmd/api/main.go --output ./docs
+```
+
+**Swagger UI 라우팅 추가** (main.go):
+```go
+import httpSwagger "github.com/swaggo/http-swagger/v2"
+import _ "github.com/june20516/orbithall/docs" // swagger docs
+
+// Swagger UI
+r.Get("/swagger/*", httpSwagger.Handler(
+    httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+))
+```
+
+**접속**:
+- 로컬: http://localhost:8080/swagger/index.html
+- 프로덕션: https://orbithall.onrender.com/swagger/index.html
+
+---
+
 ## 검증 방법
 
 ### 1. 테스트 실행
@@ -356,6 +434,23 @@ curl -X PUT http://localhost:8080/admin/sites/999 \
   -d '{}'
 # 예상: 404 Not Found (또는 403 Forbidden)
 ```
+
+---
+
+### 3. Swagger UI 테스트
+
+**접속**:
+```bash
+open http://localhost:8080/swagger/index.html
+```
+
+**검증 항목**:
+- [ ] Swagger UI가 정상적으로 로드됨
+- [ ] 모든 Admin API 엔드포인트가 표시됨 (6개)
+- [ ] 기존 Comment API 엔드포인트도 표시됨
+- [ ] "Authorize" 버튼으로 JWT 토큰 입력 가능
+- [ ] "Try it out"으로 실제 API 호출 가능
+- [ ] 응답 예시가 정확하게 표시됨
 
 ---
 
