@@ -37,6 +37,18 @@ type GoogleVerifyResponse struct {
 }
 
 // GoogleVerify는 Google ID Token을 검증하고 백엔드 JWT를 발급합니다
+//
+// @Summary      Google OAuth 인증 및 JWT 발급
+// @Description  Google ID Token을 검증하고 사용자를 생성/조회한 후 백엔드 JWT를 발급합니다
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        request body GoogleVerifyRequest true "Google 인증 정보"
+// @Success      200 {object} GoogleVerifyResponse "JWT 토큰 및 사용자 정보"
+// @Failure      400 {string} string "Invalid request body or missing required fields"
+// @Failure      401 {string} string "Invalid Google ID Token"
+// @Failure      500 {string} string "Internal server error"
+// @Router       /auth/google/verify [post]
 func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	// 1. Content-Type 검증
 	if r.Header.Get("Content-Type") != "application/json" {
