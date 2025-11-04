@@ -1,0 +1,21 @@
+name: PR Validation # Action의 이름
+
+on:
+  pull_request: # PR 이벤트가 발생할 때 실행
+    branches:
+      - main     # main 브랜치를 대상으로 하는 PR일 경우에만
+
+jobs:
+  validate-production-build: # 작업(Job)의 ID
+    name: Validate Production Build # GitHub UI에 표시될 작업 이름
+    runs-on: ubuntu-latest # 작업이 실행될 환경
+
+    steps:
+      # 1. PR에 포함된 코드를 체크아웃합니다.
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # 2. 로컬에서 실행했던 것과 동일한 Docker 빌드 명령을 실행합니다.
+      #    이 명령이 실패하면 Action도 실패 처리됩니다.
+      - name: Run docker build
+        run: docker build --target production .
