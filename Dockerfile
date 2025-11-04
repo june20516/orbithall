@@ -19,6 +19,9 @@ RUN curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/
 # Air 설치 (Go 파일 변경 시 자동 재컴파일 및 재시작)
 RUN go install github.com/air-verse/air@latest
 
+# Swag 설치 (OpenAPI 문서 생성 도구)
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
 # Go 모듈 파일 복사 (의존성 캐싱을 위해 소스 코드보다 먼저 복사)
 # go.sum은 go mod download 실행 시 자동 생성됨
 COPY go.mod ./
@@ -31,6 +34,9 @@ COPY . .
 
 # go.sum 파일 생성/업데이트 (실행 전 필수)
 RUN go mod tidy
+
+# Swagger 문서 생성 (OpenAPI 3.0 스펙)
+RUN swag init -g cmd/api/main.go --output ./docs
 
 # 마이그레이션 파일 복사
 COPY migrations /migrations
@@ -55,6 +61,9 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
+# Swag 설치 (OpenAPI 문서 생성 도구)
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
 # Go 모듈 파일 복사
 # go.sum은 go mod download 실행 시 자동 생성됨
 COPY go.mod ./
@@ -67,6 +76,9 @@ COPY . .
 
 # go.sum 파일 생성/업데이트 (빌드 전 필수)
 RUN go mod tidy
+
+# Swagger 문서 생성 (OpenAPI 3.0 스펙)
+RUN swag init -g cmd/api/main.go --output ./docs
 
 # 정적 바이너리 빌드 (CGO 비활성화로 다른 의존성 없이 실행 가능)
 # GOOS=linux: Linux용 바이너리 생성

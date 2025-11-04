@@ -14,8 +14,35 @@ import (
 	"github.com/june20516/orbithall/internal/database"
 	"github.com/june20516/orbithall/internal/handlers"
 	"github.com/june20516/orbithall/internal/ratelimit"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"golang.org/x/time/rate"
+
+	_ "github.com/june20516/orbithall/docs" // swagger docs
 )
+
+// @title           Orbithall API
+// @version         1.0
+// @description     임베드형 댓글 시스템 API
+// @termsOfService  https://orbithall.onrender.com/terms
+
+// @contact.name   API Support
+// @contact.email  support@orbithall.com
+
+// @license.name  MIT
+// @license.url   https://opensource.org/licenses/MIT
+
+// @host      localhost:8080
+// @BasePath  /
+
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name X-Orbithall-API-Key
+// @description 위젯 접근용 API Key (사이트별 발급)
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description JWT 토큰 ("Bearer " 접두사 포함)
 
 func main() {
 	if err := run(); err != nil {
@@ -55,6 +82,8 @@ func run() error {
 	// 핸들러 초기화
 	// ============================================
 	commentHandler := handlers.NewCommentHandler(db)
+	authHandler := handlers.NewAuthHandler(db)
+	adminHandler := handlers.NewAdminHandler(db)
 
 	// ============================================
 	// Rate Limiter 초기화
@@ -112,6 +141,12 @@ func run() error {
 		w.Write([]byte(`{"status":"ok","service":"orbithall"}`))
 	})
 
+	// Auth 라우트 그룹 (/auth 접두사, 인증 불필요)
+	r.Route("/auth", func(r chi.Router) {
+		// Google OAuth 검증 및 JWT 발급
+		r.Post("/google/verify", authHandler.GoogleVerify)
+	})
+
 	// API 라우트 그룹 (/api 접두사)
 	r.Route("/api", func(r chi.Router) {
 		// 인증 미들웨어 적용 (모든 API 요청은 API 키 필요)
@@ -124,6 +159,30 @@ func run() error {
 		r.Put("/comments/{id}", commentHandler.UpdateComment)
 		r.Delete("/comments/{id}", commentHandler.DeleteComment)
 	})
+
+	// Admin 라우트 그룹 (/admin 접두사, JWT 인증 필요)
+	r.Route("/admin", func(r chi.Router) {
+		// JWT 인증 미들웨어 적용 (모든 Admin 요청은 JWT 토큰 필요)
+		r.Use(handlers.JWTAuthMiddleware(db))
+
+		// 프로필 조회
+		r.Get("/profile", adminHandler.GetProfile)
+
+		// 사이트 관리
+		r.Get("/sites", adminHandler.ListSites)
+		r.Post("/sites", adminHandler.CreateSite)
+		r.Get("/sites/{id}", adminHandler.GetSite)
+		r.Put("/sites/{id}", adminHandler.UpdateSite)
+		r.Delete("/sites/{id}", adminHandler.DeleteSite)
+	})
+
+	// ============================================
+	// Swagger UI
+	// ============================================
+	// OpenAPI 3.0 문서 및 인터랙티브 API 테스트 UI
+	r.Get("/swagger/*", httpSwagger.Handler(
+		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+	))
 
 	// ============================================
 	// 서버 시작

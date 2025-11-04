@@ -55,6 +55,7 @@ docker-compose up
 ```
 
 이 명령어는 다음을 자동으로 수행합니다:
+
 - PostgreSQL 16 컨테이너 시작
 - Go 의존성 다운로드 (go.sum 자동 생성)
 - API 서버 빌드 및 실행
@@ -72,12 +73,18 @@ curl http://localhost:8080/api/comments
 
 ## API 엔드포인트
 
+### Swagger 문서
+
+- http://localhost:8080/swagger/index.html
+
 ### 헬스체크
+
 ```
 GET /health
 ```
 
 응답 예시:
+
 ```json
 {
   "status": "ok",
@@ -86,12 +93,14 @@ GET /health
 ```
 
 ### 댓글 생성
+
 ```
 POST /api/posts/:slug/comments
 Headers: X-Orbithall-API-Key
 ```
 
 요청 예시:
+
 ```json
 {
   "author_name": "작성자",
@@ -101,12 +110,14 @@ Headers: X-Orbithall-API-Key
 ```
 
 ### 댓글 조회
+
 ```
 GET /api/posts/:slug/comments
 Headers: X-Orbithall-API-Key
 ```
 
 응답 예시:
+
 ```json
 {
   "comments": [...],
@@ -121,11 +132,11 @@ Headers: X-Orbithall-API-Key
 
 ## 환경변수
 
-| 변수명 | 설명 | 기본값 |
-|--------|------|--------|
-| `PORT` | API 서버 포트 | `8080` |
-| `DATABASE_URL` | PostgreSQL 연결 문자열 | docker-compose에서 자동 설정 |
-| `ENV` | 환경 (development/production) | `development` |
+| 변수명         | 설명                          | 기본값                       |
+| -------------- | ----------------------------- | ---------------------------- |
+| `PORT`         | API 서버 포트                 | `8080`                       |
+| `DATABASE_URL` | PostgreSQL 연결 문자열        | docker-compose에서 자동 설정 |
+| `ENV`          | 환경 (development/production) | `development`                |
 
 **참고**: CORS는 사이트별 동적 검증 방식을 사용합니다. 각 사이트의 `cors_origins` 배열로 관리됩니다.
 
@@ -154,6 +165,7 @@ API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
 ### IP 추출 방식
 
 프록시 환경을 고려하여 다음 순서로 IP를 확인합니다:
+
 1. `X-Forwarded-For` 헤더 (첫 번째 IP)
 2. `X-Real-IP` 헤더
 3. `RemoteAddr` (직접 연결)
@@ -165,17 +177,25 @@ API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
 ### 빠른 시작
 
 ```html
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.css">
+<link
+  rel="stylesheet"
+  href="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.css"
+/>
 
-<div data-orb-container data-widget-type="comments" data-post-slug="your-post-id"></div>
+<div
+  data-orb-container
+  data-widget-type="comments"
+  data-post-slug="your-post-id"
+></div>
 
 <script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.js"></script>
 <script>
-  OrbitHall.init({ apiKey: 'YOUR_API_KEY' });
+  OrbitHall.init({ apiKey: "YOUR_API_KEY" });
 </script>
 ```
 
 **상세한 사용법은 [widget/README.md](widget/README.md)를 참고하세요.**
+
 - Next.js, React 통합 가이드
 - 스타일 커스터마이징
 - 다국어 설정
@@ -189,55 +209,69 @@ API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
 
 ```typescript
 // 댓글 조회
-const response = await fetch('https://orbithall.onrender.com/api/posts/my-post-slug/comments', {
-  headers: {
-    'X-Orbithall-API-Key': 'YOUR_API_KEY'
+const response = await fetch(
+  "https://orbithall.onrender.com/api/posts/my-post-slug/comments",
+  {
+    headers: {
+      "X-Orbithall-API-Key": "YOUR_API_KEY",
+    },
   }
-});
+);
 const data = await response.json();
 
 // 댓글 작성
-await fetch('https://orbithall.onrender.com/api/posts/my-post-slug/comments', {
-  method: 'POST',
+await fetch("https://orbithall.onrender.com/api/posts/my-post-slug/comments", {
+  method: "POST",
   headers: {
-    'Content-Type': 'application/json',
-    'X-Orbithall-API-Key': 'YOUR_API_KEY'
+    "Content-Type": "application/json",
+    "X-Orbithall-API-Key": "YOUR_API_KEY",
   },
   body: JSON.stringify({
-    author: '작성자',
-    password: '1234',
-    content: '댓글 내용',
-    parentId: null // 대댓글인 경우 부모 댓글 ID
-  })
+    author: "작성자",
+    password: "1234",
+    content: "댓글 내용",
+    parentId: null, // 대댓글인 경우 부모 댓글 ID
+  }),
 });
 ```
 
 ## 개발 팁
 
 ### 컨테이너 재시작
+
 ```bash
 docker-compose restart
 ```
 
 ### 컨테이너 중지 및 제거
+
 ```bash
 docker-compose down
 ```
 
 ### 데이터베이스 초기화 (볼륨 삭제)
+
 ```bash
 docker-compose down -v
 ```
 
 ### 로그 확인
+
 ```bash
 docker-compose logs -f api      # API 서버 로그
 docker-compose logs -f postgres # DB 로그
 ```
 
 ### PostgreSQL 직접 접속
+
 ```bash
 docker exec -it orbithall-db psql -U orbithall -d orbithall_db
+```
+
+### json/yaml을 직접 확인하려는 경우
+
+```bash
+  ~/go/bin/swag init -g cmd/api/main.go --output ./docs
 ```
 
 ## 테스트
@@ -280,11 +314,13 @@ go test -cover ./...
 - **자동 정리**: Cleanup 함수 불필요, `defer cleanup()` 한 줄로 자동 롤백
 
 자세한 내용은 다음 문서를 참고하세요:
+
 - `docs/adr/002-transaction-based-testing-strategy.md`
 
 ## 배포 정보
 
 ### 프로덕션 환경
+
 - **API URL**: https://orbithall.onrender.com
 - **Database**: Supabase (Seoul Region)
 - **Auto-Deploy**: main 브랜치 푸시 시 자동 배포
