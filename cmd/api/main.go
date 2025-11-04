@@ -132,6 +132,17 @@ func run() error {
 		r.Delete("/comments/{id}", commentHandler.DeleteComment)
 	})
 
+	// Admin 라우트 그룹 (/admin 접두사, JWT 인증 필요)
+	r.Route("/admin", func(r chi.Router) {
+		// JWT 인증 미들웨어 적용 (모든 Admin 요청은 JWT 토큰 필요)
+		r.Use(handlers.JWTAuthMiddleware(db))
+
+		// Admin 엔드포인트는 작업 012에서 구현 예정
+		// 예시:
+		// r.Get("/sites", adminHandler.ListSites)
+		// r.Post("/sites", adminHandler.CreateSite)
+	})
+
 	// ============================================
 	// 서버 시작
 	// ============================================
