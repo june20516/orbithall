@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -55,15 +56,17 @@ const siteContextKey contextKey = "site"
 // ============================================
 
 // ErrorResponse는 API 에러 응답의 표준 구조입니다
+// @Description API 에러 응답의 표준 구조
 type ErrorResponse struct {
 	Error ErrorDetail `json:"error"`
 }
 
 // ErrorDetail은 에러의 상세 정보를 담습니다
+// @Description 에러의 상세 정보
 type ErrorDetail struct {
-	Code    string      `json:"code"`              // 에러 코드 (예: MISSING_API_KEY)
-	Message string      `json:"message"`           // 사람이 읽을 수 있는 에러 메시지
-	Details interface{} `json:"details,omitempty"` // 선택적 추가 정보 (예: 입력 검증 오류 목록)
+	Code    string      `json:"code" example:"INVALID_INPUT"`                  // 에러 코드 (예: MISSING_API_KEY, INVALID_INPUT, WRONG_PASSWORD)
+	Message string      `json:"message" example:"Validation failed"`           // 사람이 읽을 수 있는 에러 메시지
+	Details interface{} `json:"details,omitempty" swaggertype:"object"`        // 선택적 추가 정보 (예: 입력 검증 오류 목록)
 }
 
 // ============================================
@@ -77,8 +80,15 @@ func respondJSON(w http.ResponseWriter, statusCode int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// respondError는 에러 응답을 클라이언트에 전송합니다
+// respondError는 에러 응답을 클라이언트에 전송하고 로그를 기록합니다
 func respondError(w http.ResponseWriter, statusCode int, code string, message string, details interface{}) {
+	// 에러 로그 기록
+	if details != nil {
+		log.Printf("[ERROR] Status: %d, Code: %s, Message: %s, Details: %v", statusCode, code, message, details)
+	} else {
+		log.Printf("[ERROR] Status: %d, Code: %s, Message: %s", statusCode, code, message)
+	}
+
 	response := ErrorResponse{
 		Error: ErrorDetail{
 			Code:    code,
