@@ -100,8 +100,22 @@ func filterDeletedCommentsAndMaskIP(comments []*models.Comment) []*models.Commen
 // HTTP 핸들러 메서드
 // ============================================
 
-// CreateComment는 새 댓글을 생성합니다
-// POST /api/posts/:slug/comments
+// CreateComment godoc
+// @Summary 댓글 생성
+// @Description 특정 포스트에 새로운 댓글을 생성합니다. 대댓글(parent_id 지정)도 가능하지만 2-depth 이상은 허용되지 않습니다.
+// @Tags comments
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param slug path string true "Post Slug"
+// @Param comment body validators.CommentCreateInput true "댓글 생성 정보"
+// @Success 201 {object} models.Comment "댓글 생성 성공"
+// @Failure 400 {object} object{error=object{code=string,message=string,details=object}} "INVALID_INPUT - slug 누락, 잘못된 입력, 검증 실패, 2-depth 초과" example({"error":{"code":"INVALID_INPUT","message":"Validation failed","details":{}}})
+// @Failure 401 {object} object{error=object{code=string,message=string}} "MISSING_API_KEY - API 키 헤더 누락" example({"error":{"code":"MISSING_API_KEY","message":"API key is required"}})
+// @Failure 403 {object} object{error=object{code=string,message=string}} "INVALID_API_KEY | SITE_INACTIVE | INVALID_ORIGIN" example({"error":{"code":"INVALID_API_KEY","message":"Invalid API key"}})
+// @Failure 404 {object} object{error=object{code=string,message=string}} "COMMENT_NOT_FOUND - 부모 댓글을 찾을 수 없음" example({"error":{"code":"COMMENT_NOT_FOUND","message":"Parent comment not found"}})
+// @Failure 500 {object} object{error=object{code=string,message=string}} "INTERNAL_SERVER_ERROR - 서버 내부 오류" example({"error":{"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"}})
+// @Router /api/posts/{slug}/comments [post]
 func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// 1. Context에서 사이트 정보 추출 (AuthMiddleware에서 주입됨)
 	ctx := r.Context()
@@ -201,8 +215,22 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, response)
 }
 
-// ListComments는 포스트의 댓글 목록을 조회합니다
-// GET /api/posts/:slug/comments
+// ListComments godoc
+// @Summary 댓글 목록 조회
+// @Description 특정 포스트의 댓글 목록을 페이지네이션과 함께 조회합니다. 삭제된 댓글 중 대댓글이 있는 경우 계층 구조 유지를 위해 빈 내용으로 포함됩니다.
+// @Tags comments
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param slug path string true "Post Slug"
+// @Param page query int false "페이지 번호 (기본값: 1)"
+// @Param limit query int false "페이지당 댓글 수 (기본값: 50, 최대: 100)"
+// @Success 200 {object} object{comments=[]models.Comment,pagination=object{current_page=int,total_pages=int,total_comments=int,per_page=int}} "댓글 목록 조회 성공"
+// @Failure 400 {object} object{error=object{code=string,message=string}} "INVALID_INPUT - slug 누락" example({"error":{"code":"INVALID_INPUT","message":"Post slug is required"}})
+// @Failure 401 {object} object{error=object{code=string,message=string}} "MISSING_API_KEY - API 키 헤더 누락" example({"error":{"code":"MISSING_API_KEY","message":"API key is required"}})
+// @Failure 403 {object} object{error=object{code=string,message=string}} "INVALID_API_KEY | SITE_INACTIVE | INVALID_ORIGIN" example({"error":{"code":"INVALID_API_KEY","message":"Invalid API key"}})
+// @Failure 500 {object} object{error=object{code=string,message=string}} "INTERNAL_SERVER_ERROR - 서버 내부 오류" example({"error":{"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"}})
+// @Router /api/posts/{slug}/comments [get]
 func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	// 1. Context에서 사이트 정보 추출
 	ctx := r.Context()
@@ -281,8 +309,22 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UpdateComment는 기존 댓글을 수정합니다
-// PUT /api/comments/:id
+// UpdateComment godoc
+// @Summary 댓글 수정
+// @Description 기존 댓글의 내용을 수정합니다. 작성 후 30분 이내, 올바른 비밀번호 입력 시에만 가능합니다.
+// @Tags comments
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param id path int true "Comment ID"
+// @Param comment body validators.CommentUpdateInput true "댓글 수정 정보"
+// @Success 200 {object} models.Comment "댓글 수정 성공"
+// @Failure 400 {object} object{error=object{code=string,message=string,details=object}} "INVALID_INPUT - 잘못된 댓글 ID, 검증 실패" example({"error":{"code":"INVALID_INPUT","message":"Invalid comment ID"}})
+// @Failure 401 {object} object{error=object{code=string,message=string}} "MISSING_API_KEY - API 키 헤더 누락" example({"error":{"code":"MISSING_API_KEY","message":"API key is required"}})
+// @Failure 403 {object} object{error=object{code=string,message=string}} "WRONG_PASSWORD | EDIT_TIME_EXPIRED | COMMENT_NOT_FOUND(다른 사이트)" example({"error":{"code":"WRONG_PASSWORD","message":"Password does not match"}})
+// @Failure 404 {object} object{error=object{code=string,message=string}} "COMMENT_NOT_FOUND - 댓글을 찾을 수 없음" example({"error":{"code":"COMMENT_NOT_FOUND","message":"Comment not found"}})
+// @Failure 500 {object} object{error=object{code=string,message=string}} "INTERNAL_SERVER_ERROR - 서버 내부 오류" example({"error":{"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"}})
+// @Router /api/comments/{id} [put]
 func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// 1. Context에서 사이트 정보 추출
 	ctx := r.Context()
@@ -395,8 +437,22 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, response)
 }
 
-// DeleteComment는 댓글을 삭제합니다 (soft delete)
-// DELETE /api/comments/:id
+// DeleteComment godoc
+// @Summary 댓글 삭제
+// @Description 댓글을 소프트 삭제합니다. 작성 후 30분 이내, 올바른 비밀번호 입력 시에만 가능합니다.
+// @Tags comments
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param id path int true "Comment ID"
+// @Param password body object{password=string} true "비밀번호"
+// @Success 204 "댓글 삭제 성공"
+// @Failure 400 {object} object{error=object{code=string,message=string}} "INVALID_INPUT - 잘못된 댓글 ID, 비밀번호 누락" example({"error":{"code":"INVALID_INPUT","message":"Password is required"}})
+// @Failure 401 {object} object{error=object{code=string,message=string}} "MISSING_API_KEY - API 키 헤더 누락" example({"error":{"code":"MISSING_API_KEY","message":"API key is required"}})
+// @Failure 403 {object} object{error=object{code=string,message=string}} "WRONG_PASSWORD | EDIT_TIME_EXPIRED | COMMENT_NOT_FOUND(다른 사이트)" example({"error":{"code":"EDIT_TIME_EXPIRED","message":"Comments can only be deleted within 30 minutes of creation"}})
+// @Failure 404 {object} object{error=object{code=string,message=string}} "COMMENT_NOT_FOUND - 댓글을 찾을 수 없음 또는 이미 삭제됨" example({"error":{"code":"COMMENT_NOT_FOUND","message":"Comment not found"}})
+// @Failure 500 {object} object{error=object{code=string,message=string}} "INTERNAL_SERVER_ERROR - 서버 내부 오류" example({"error":{"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"}})
+// @Router /api/comments/{id} [delete]
 func (h *CommentHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	// 1. Context에서 사이트 정보 추출
 	ctx := r.Context()
