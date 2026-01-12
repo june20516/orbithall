@@ -141,6 +141,26 @@ func run() error {
 		w.Write([]byte(`{"status":"ok","service":"orbithall"}`))
 	})
 
+	// 데이터베이스 헬스체크 엔드포인트 (DB 연결 상태 확인용)
+	r.Get("/health/db", func(w http.ResponseWriter, r *http.Request) {
+		// DB 연결 확인
+		ctx := r.Context()
+		err := db.PingContext(ctx)
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if err != nil {
+			// DB 연결 실패
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"status":"error","service":"orbithall","database":"unavailable"}`))
+			return
+		}
+
+		// DB 연결 성공
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok","service":"orbithall","database":"connected"}`))
+	})
+
 	// Auth 라우트 그룹 (/auth 접두사, 인증 불필요)
 	r.Route("/auth", func(r chi.Router) {
 		// Google OAuth 검증 및 JWT 발급
