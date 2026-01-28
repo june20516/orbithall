@@ -143,22 +143,23 @@ func run() error {
 
 	// 데이터베이스 헬스체크 엔드포인트 (DB 연결 상태 확인용)
 	r.Get("/health/db", func(w http.ResponseWriter, r *http.Request) {
-		// DB 연결 확인
 		ctx := r.Context()
-		err := db.PingContext(ctx)
+    
+		var result int
+		err := db.QueryRowContext(ctx, "SELECT 1").Scan(&result)
 
 		w.Header().Set("Content-Type", "application/json")
 
 		if err != nil {
-			// DB 연결 실패
+			// 실제 쿼리 실패 시 에러 응답
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte(`{"status":"error","service":"orbithall","database":"unavailable"}`))
 			return
 		}
 
-		// DB 연결 성공
+		// 실제 쿼리 성공 시 성공 응답
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok","service":"orbithall","database":"connected"}`))
+		w.Write([]byte(`{"status":"ok","service":"orbithall","database":"active_query_success"}`))
 	})
 
 	// Auth 라우트 그룹 (/auth 접두사, 인증 불필요)
