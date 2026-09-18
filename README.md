@@ -10,9 +10,9 @@ Orbithall은 slug 기반 웹 콘텐츠를 위한 독립형 댓글 시스템입�
 
 - **Backend**: Go 1.25
 - **Framework**: Chi (HTTP 라우터)
-- **Database**: PostgreSQL 16 (Supabase)
+- **Database**: PostgreSQL 18 (Neon)
 - **Infrastructure**: Docker + Docker Compose
-- **Deployment**: Render (API) + Supabase (Database)
+- **Deployment**: Render (API) + Neon (Database)
 
 ## 프로젝트 구조
 
@@ -56,7 +56,7 @@ docker-compose up
 
 이 명령어는 다음을 자동으로 수행합니다:
 
-- PostgreSQL 16 컨테이너 시작
+- PostgreSQL 18 컨테이너 시작
 - Go 의존성 다운로드 (go.sum 자동 생성)
 - API 서버 빌드 및 실행
 - 코드 변경 시 자동 재시작 (Air)
@@ -361,16 +361,17 @@ go test -cover ./...
 ### 프로덕션 환경
 
 - **API URL**: https://orbithall.onrender.com
-- **Database**: Supabase (Seoul Region)
+- **Database**: Neon (Singapore Region, Free Plan)
+- **DB 연결**: `DATABASE_URL`은 호스트에 `-pooler`가 없는 direct 연결을 사용합니다. 마이그레이션 도구(golang-migrate)가 세션 단위 잠금을 사용하므로 transaction 모드 풀러와 호환되지 않습니다
 - **Auto-Deploy**: main 브랜치 푸시 시 자동 배포
 
-자세한 배포 가이드는 `docs/tasks/completed/003-deployment.md`를 참고하세요.
+자세한 배포 가이드는 `docs/tasks/completed/003-deployment.md`를, DB 이전 내역은 `docs/tasks/completed/017-neon-migration.md`를 참고하세요.
 
 ## 다음 단계
 
 - [x] 데이터베이스 스키마 설계
 - [x] 댓글 CRUD API 구현
-- [x] 프로덕션 배포 (Render + Supabase)
+- [x] 프로덕션 배포 (Render + Neon)
 - [x] JS Widget 구현 (Preact + Bun)
 - [x] jsDelivr CDN 배포
 - [x] Rate Limiting 구현
