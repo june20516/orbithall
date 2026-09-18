@@ -4,8 +4,8 @@
 services:
   # PostgreSQL 데이터베이스 서비스
   postgres:
-    # 공식 PostgreSQL 16 이미지 (경량화된 alpine 버전)
-    image: postgres:16-alpine
+    # 공식 PostgreSQL 18 이미지 (경량화된 alpine 버전)
+    image: postgres:18-alpine
     container_name: orbithall-db
     # 호스트:컨테이너 포트 매핑 (로컬에서 5432 포트로 접근 가능)
     ports:
@@ -16,8 +16,9 @@ services:
       POSTGRES_PASSWORD: dev_password    # 데이터베이스 비밀번호 (개발용)
       POSTGRES_DB: orbithall_db          # 생성할 데이터베이스 이름
     # 데이터 영속성을 위한 볼륨 마운트 (컨테이너 재시작 시에도 데이터 유지)
+    # PostgreSQL 18 이미지는 데이터를 /var/lib/postgresql/18/docker에 저장하므로 상위 경로를 마운트
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     # 컨테이너 시작 후 테스트 DB 생성 (이미 존재하면 에러 무시)
     command: >
       sh -c "
