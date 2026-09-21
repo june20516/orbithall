@@ -1,7 +1,8 @@
 package models
 
 import (
-	"net"
+	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -63,35 +64,30 @@ type Comment struct {
 }
 
 // MaskIPAddress는 IP 주소를 마스킹하여 개인정보를 보호합니다
-// IPv4: 앞 2 옥텟만 표시 (예: 192.168.***.*** )
-// IPv6: 앞 4개 그룹만 표시 (예: 2001:0db8:****:****:****:****:****:****)
+// IPv4: 앞 2 옥텟(/16)만 표시 (예: 192.168.***.***)
+// IPv6: 8개 그룹으로 펼친 표기의 앞 2 그룹(/32)만 표시 (예: 2001:0db8:****:****:****:****:****:****)
+// IPv4-mapped IPv6(::ffff:1.2.3.4)는 IPv4로 취급합니다
 func MaskIPAddress(ip string) string {
 	// 빈 문자열 처리
 	if ip == "" {
 		return ""
 	}
 
-	// IP 파싱
-	parsedIP := net.ParseIP(ip)
-	if parsedIP == nil {
+	// IP 파싱 (zone 포함 IPv6도 허용)
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
 		// 파싱 실패 시 기본 마스킹 (안전한 폴백)
 		return "***.***.***.***"
 	}
+	addr = addr.Unmap().WithZone("")
 
 	// IPv4 처리
-	if parsedIP.To4() != nil {
-		parts := strings.Split(ip, ".")
-		if len(parts) == 4 {
-			return parts[0] + "." + parts[1] + ".***.***"
-		}
-		return "***.***.***.***"
+	if addr.Is4() {
+		octets := addr.As4()
+		return fmt.Sprintf("%d.%d.***.***", octets[0], octets[1])
 	}
 
-	// IPv6 처리
-	parts := strings.Split(ip, ":")
-	if len(parts) >= 4 {
-		return strings.Join(parts[:4], ":") + ":****:****:****:****"
-	}
-
-	return "****:****:****:****:****:****:****:****"
+	// IPv6 처리: 압축 표기(::)를 8개 그룹으로 펼친 뒤 앞 2 그룹만 남김
+	groups := strings.Split(addr.StringExpanded(), ":")
+	return strings.Join(groups[:2], ":") + ":****:****:****:****:****:****"
 }
