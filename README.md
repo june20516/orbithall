@@ -218,7 +218,7 @@ API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
 ```html
 <link
   rel="stylesheet"
-  href="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.css"
+  href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.css"
 />
 
 <div
@@ -227,7 +227,7 @@ API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
   data-post-slug="your-post-id"
 ></div>
 
-<script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js"></script>
 <script>
   OrbitHall.init({ apiKey: "YOUR_API_KEY" });
 </script>

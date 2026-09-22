@@ -13,14 +13,14 @@ HTML 페이지에 다음 코드를 추가하세요:
 <html>
 <head>
   <!-- CSS 로드 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.css">
 </head>
 <body>
   <!-- 위젯 컨테이너 -->
   <div data-orb-container data-widget-type="comments" data-post-slug="my-post-id"></div>
 
   <!-- JS 로드 및 초기화 -->
-  <script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js"></script>
   <script>
     OrbitHall.init({
       apiKey: 'YOUR_API_KEY'
@@ -55,14 +55,14 @@ export default function RootLayout({ children }) {
       <head>
         <link
           rel="stylesheet"
-          href="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.css"
+          href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.css"
         />
       </head>
       <body>
         {children}
 
         <Script
-          src="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.js"
+          src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js"
           onLoad={() => {
             window.OrbitHall.init({
               apiKey: process.env.NEXT_PUBLIC_ORBITHALL_API_KEY
@@ -103,7 +103,7 @@ function App() {
   useEffect(() => {
     // 스크립트 로드
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.js';
+    script.src = 'https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js';
     script.onload = () => {
       window.OrbitHall.init({
         apiKey: process.env.REACT_APP_ORBITHALL_API_KEY
@@ -226,51 +226,50 @@ IIFE 포맷으로 빌드되어 전역 스코프에 `OrbitHall` 객체를 노출�
 
 ### 배포
 
-#### 버전 관리 배포
+#### 릴리스 절차
 
-Orbithall은 **버전별 브랜치 배포** 방식을 사용합니다.
+위젯은 **semver 태그**(`v{version}`)로 릴리스합니다.
 
-1. `package.json`의 `version` 수정:
+1. `package.json`의 `version`을 올리고 main까지 머지합니다:
    ```json
    {
-     "version": "1.0.1"
+     "version": "1.1.2"
    }
    ```
 
-2. 배포 스크립트 실행:
+2. 깨끗한 작업 트리에서 배포 스크립트를 실행합니다:
    ```bash
    bun run publish
    ```
 
-3. 자동으로 다음 작업이 수행됩니다:
-   - main 브랜치 최신화
+3. 스크립트가 다음을 수행합니다:
+   - `origin/main` 최신 코드를 detached 상태로 checkout
    - 프로덕션 빌드
-   - `widget/v{version}` 브랜치 생성
-   - 빌드 결과물 커밋 및 푸시
-   - jsDelivr CDN에 자동 배포
+   - 빌드 결과물만 추가한 릴리스 커밋 생성 (어느 브랜치에도 머지하지 않음)
+   - 릴리스 커밋에 `v{version}` 태그를 붙여 태그만 push
+   - 원래 브랜치로 복귀
+
+4. `README.md`, `widget/README.md`, `docs/specs/widget-integration-guide.md`의 설치 주소 버전을 갱신합니다.
 
 #### CDN URL
 
 ```
-https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v{version}/static/embed.js
-https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v{version}/static/embed.css
+https://cdn.jsdelivr.net/gh/june20516/orbithall@{version}/static/embed.js
+https://cdn.jsdelivr.net/gh/june20516/orbithall@{version}/static/embed.css
 ```
 
-예: `widget/v1.0.0` 브랜치는 다음 URL로 접근 가능:
-```
-https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.js
-```
+- 고정 버전(예: `@1.1.1`)을 권장합니다. jsDelivr가 1년 immutable 캐시로 제공하므로 한 번 받으면 바뀌지 않습니다.
+- 범위 버전(예: `@1`)은 1.x의 최신 버전을 따라갑니다. 다만 새 버전이 CDN에는 최대 12시간, 브라우저에는 최대 7일 늦게 반영됩니다.
 
 #### 배포 안전장치
 
-publish 스크립트는 다음 안전장치를 포함합니다:
+1. **깨끗한 작업 트리 요구**: 변경사항이 있으면 중단 (publish.js 수정 포함)
+2. **API URL 확인**: `ORB_PUBLIC_API_URL`이 비어 있으면 중단, 값이 있으면 출력
+3. **버전 중복 체크**: 같은 버전 태그가 로컬이나 원격에 있으면 중단
+4. **force push 없음**: 태그 push에 실패하면 로컬 태그를 지워 다시 시도 가능
+5. **자동 복귀**: 성공 여부와 관계없이 스크립트가 만든 변경을 버리고 원래 브랜치로 복귀
 
-1. **버전 중복 체크**: 이미 배포된 버전은 재배포 차단
-2. **스크립트 무결성**: publish.js 수정 시 배포 차단
-3. **자동 복구**: 에러 발생 시 원래 브랜치로 자동 복귀
-4. **변경사항 보존**: stash를 통한 워킹 디렉토리 보호
-
-자세한 내용은 [ADR-006](../docs/adr/006-widget-versioning-deployment-strategy.md)을 참고하세요.
+자세한 내용은 [ADR-007](../docs/adr/007-widget-semver-tag-release.md)을 참고하세요.
 
 ### 아키텍처
 

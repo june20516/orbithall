@@ -48,3 +48,7 @@ vendor/
 /docs/docs.go
 /docs/swagger.json
 /docs/swagger.yaml
+
+# widget build output (릴리스 태그 커밋에만 포함, ADR-007)
+/static/embed.js
+/static/embed.css
