@@ -4,7 +4,7 @@
 2025-10-24
 
 ## 버전
-v1.0
+v1.1
 
 ## 개요
 웹사이트에 삽입 가능한 경량 댓글 위젯 시스템입니다. Preact 기반으로 구축되며, CDN을 통해 배포됩니다. 단일 스크립트 태그로 설치 가능하며, data-* 속성을 통한 선언적 설정을 지원합니다.
@@ -28,8 +28,8 @@ SO THAT 복잡한 설정 없이 빠르게 댓글 기능을 추가할 수 있다
 ### 필수 기능
 1. **CDN 배포**
    - 설명: jsDelivr를 통한 전역 배포
-   - 조건: 버전별 브랜치로 불변성 보장
-   - 결과: `widget/v{version}` 브랜치에서 제공
+   - 조건: semver 태그(`v{version}`)로 불변성 보장
+   - 결과: `@{version}` 주소로 제공 (예: `@1.1.1`)
 
 2. **선언적 위젯 초기화**
    - 설명: HTML 속성 기반 설정
@@ -102,20 +102,21 @@ SO THAT 복잡한 설정 없이 빠르게 댓글 기능을 추가할 수 있다
 - 전역 객체: `window.OrbitHall`
 
 ### 배포 전략
-1. **버전별 브랜치 배포**
-   - 패턴: `widget/v{major}.{minor}.{patch}`
-   - 예시: `widget/v1.0.0`, `widget/v1.0.1`
-   - 불변성: 배포 후 코드 변경 불가 (브랜치 보호)
+1. **semver 태그 릴리스**
+   - 태그: `v{major}.{minor}.{patch}` (예: `v1.1.1`)
+   - 릴리스 커밋: `origin/main` 위에 빌드 결과물만 추가한 커밋, 어느 브랜치에도 머지하지 않음
+   - 불변성: jsDelivr가 정확한 버전을 1년 immutable 캐시로 제공
 
 2. **CDN URL 구조**
    ```
-   https://cdn.jsdelivr.net/gh/{org}/{repo}@{branch}/static/embed.js
-   https://cdn.jsdelivr.net/gh/{org}/{repo}@{branch}/static/embed.css
+   https://cdn.jsdelivr.net/gh/{org}/{repo}@{version}/static/embed.js
+   https://cdn.jsdelivr.net/gh/{org}/{repo}@{version}/static/embed.css
    ```
+   - 범위 주소(`@1`)도 동작하지만, 새 버전이 CDN에 최대 12시간, 브라우저에 최대 7일 늦게 반영됨
 
 3. **자동화 스크립트**
-   - `bun run publish`: 버전 확인 → 빌드 → 브랜치 생성 → 푸시
-   - 안전장치: 버전 중복 체크, 스크립트 무결성 검증
+   - `bun run publish`: 사전 검사 → origin/main 빌드 → 릴리스 커밋·태그 → 태그 push
+   - 안전장치: 깨끗한 작업 트리 요구, 버전 태그 중복 체크, force push 없음
 
 ## 사용법
 
@@ -124,12 +125,12 @@ SO THAT 복잡한 설정 없이 빠르게 댓글 기능을 추가할 수 있다
 <!DOCTYPE html>
 <html>
 <head>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.css">
 </head>
 <body>
   <div data-orb-container data-widget-type="comments" data-post-slug="my-post"></div>
 
-  <script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js"></script>
   <script>
     OrbitHall.init({
       apiKey: 'YOUR_API_KEY'
@@ -148,12 +149,12 @@ export default function RootLayout({ children }) {
   return (
     <html>
       <head>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.css" />
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.css" />
       </head>
       <body>
         {children}
         <Script
-          src="https://cdn.jsdelivr.net/gh/june20516/orbithall@widget/v1.0.0/static/embed.js"
+          src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js"
           onLoad={() => {
             window.OrbitHall.init({
               apiKey: process.env.NEXT_PUBLIC_ORBITHALL_API_KEY
@@ -326,9 +327,10 @@ ORB_PUBLIC_API_URL=https://orbithall.onrender.com/api
 - Preact 공식 문서: https://preactjs.com/
 - jsDelivr CDN: https://www.jsdelivr.com/
 - Bun 빌드 도구: https://bun.sh/
-- [ADR-006: 위젯 버전 관리 및 배포 전략](../adr/006-widget-versioning-deployment-strategy.md)
+- [ADR-007: 위젯 semver 태그 릴리스](../adr/007-widget-semver-tag-release.md)
 
 ## 변경 이력
 | 날짜 | 버전 | 변경 내용 | 작성자 |
 |------|------|-----------|--------|
 | 2025-10-24 | v1.0 | 초안 작성 | Claude |
+| 2026-09-22 | v1.1 | 배포 전략을 semver 태그로 변경 (ADR-007) | Claude |

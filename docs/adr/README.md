@@ -96,7 +96,8 @@ Proposed | Accepted | Deprecated | Superseded
 | [003](003-database-sql-over-orm.md) | 데이터베이스 접근 방식 (SQL vs ORM) | Accepted | 2025-10-22 |
 | [004](004-comment-sorting-strategy.md) | 댓글 정렬 전략 | Accepted | 2025-10-22 |
 | [005](005-timestamp-function-strategy.md) | Timestamp 함수 전략 | Accepted | 2025-10-22 |
-| [006](006-widget-versioning-deployment-strategy.md) | Widget 버전 관리 및 배포 전략 | Accepted | 2025-10-24 |
+| [006](006-widget-versioning-deployment-strategy.md) | Widget 버전 관리 및 배포 전략 | Superseded by 007 | 2025-10-24 |
+| [007](007-widget-semver-tag-release.md) | Widget semver 태그 릴리스 | Accepted | 2026-09-22 |
 
 ## 참고 자료
 
