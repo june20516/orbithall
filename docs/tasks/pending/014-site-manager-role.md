@@ -41,3 +41,6 @@
 
 ## 예상 시간
 2시간
+
+## 관련 과제
+- 어드민 대응: orbithall-admin `docs/pending/site-manager-ui.md`
