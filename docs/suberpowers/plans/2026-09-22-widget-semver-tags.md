@@ -176,7 +176,10 @@ async function pushTag(tag) {
   }
 }
 
+// 시작 전에 작업 트리가 깨끗했으므로 남은 변경은 모두 이 스크립트가 만든 빌드 결과물이다.
+// 커밋 전에 실패했을 때 스테이징된 결과물이 원래 위치로 따라가지 않도록 먼저 버린다.
 async function returnTo(location) {
+  await $`git reset --hard -q`.nothrow();
   if ((await getCurrentLocation()) === location) {
     return;
   }
@@ -235,6 +238,7 @@ publish();
 설계 메모:
 - 중단 조건은 모두 `checkPreconditions`에서 git 상태를 바꾸기 전에 검사한다. 그래서 `originalLocation`은 검사를 통과한 뒤에 기록하고, 이 값이 있을 때만 복귀한다.
 - `process.exit()` 대신 `throw`와 `process.exitCode`를 쓴다. `process.exit()`를 쓰면 `finally`의 복귀가 실행되지 않는다.
+- 복귀 전에 `git reset --hard`로 스크립트가 만든 변경을 버린다. 이렇게 하지 않으면 커밋 전에 실패했을 때 `git add -f`로 스테이징한 결과물이 원래 브랜치로 따라간다. Task 3 첫 실행에서 서명 실패로 재현되어 추가했다.
 - 기본 `git fetch`는 브랜치에서 닿지 않는 태그를 가져오지 않는다. 릴리스 태그는 브랜치 밖 커밋에 붙으므로, 원격 태그 검사(`ls-remote`)가 반드시 필요하다.
 
 - [ ] **Step 2: 문법 확인**

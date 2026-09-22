@@ -83,7 +83,10 @@ async function pushTag(tag) {
   }
 }
 
+// 시작 전에 작업 트리가 깨끗했으므로 남은 변경은 모두 이 스크립트가 만든 빌드 결과물이다.
+// 커밋 전에 실패했을 때 스테이징된 결과물이 원래 위치로 따라가지 않도록 먼저 버린다.
 async function returnTo(location) {
+  await $`git reset --hard -q`.nothrow();
   if ((await getCurrentLocation()) === location) {
     return;
   }
