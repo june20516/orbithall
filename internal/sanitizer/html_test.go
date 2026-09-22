@@ -48,6 +48,46 @@ func TestSanitizeComment(t *testing.T) {
 			input:    "<div><span><b>Nested</b></span></div>",
 			expected: "Nested",
 		},
+		{
+			name:     "Keep apostrophe as is",
+			input:    "I'm happy",
+			expected: "I'm happy",
+		},
+		{
+			name:     "Keep ampersand as is",
+			input:    "Tom & Jerry",
+			expected: "Tom & Jerry",
+		},
+		{
+			name:     "Keep double quotes as is",
+			input:    `"quoted"`,
+			expected: `"quoted"`,
+		},
+		{
+			name:     "Keep less-than sign that is not a tag",
+			input:    "1 < 2",
+			expected: "1 < 2",
+		},
+		{
+			name:     "Keep entity text typed literally by user",
+			input:    "&amp; and &lt;b&gt;",
+			expected: "&amp; and &lt;b&gt;",
+		},
+		{
+			name:     "Remove script tag and keep following text",
+			input:    "<script>alert(1)</script>hi",
+			expected: "hi",
+		},
+		{
+			name:     "Keep special characters around removed tags",
+			input:    "<b>Tom</b> & <i>Jerry's</i>",
+			expected: "Tom & Jerry's",
+		},
+		{
+			name:     "Preserve Korean and emoji",
+			input:    "안녕하세요 😀👍",
+			expected: "안녕하세요 😀👍",
+		},
 	}
 
 	for _, tt := range tests {
