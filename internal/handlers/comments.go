@@ -139,7 +139,11 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. 입력 검증
+	// 4. HTML 태그 제거 (태그를 지운 결과를 검증하기 위해 검증보다 먼저 실행)
+	input.Content = sanitizer.SanitizeComment(input.Content)
+	input.AuthorName = sanitizer.SanitizeComment(input.AuthorName)
+
+	// 5. 입력 검증
 	if err := input.Validate(); err != nil {
 		// 구조화된 검증 에러인 경우 상세 정보 포함
 		if validationErrs, ok := err.(validators.ValidationErrors); ok {
@@ -150,10 +154,6 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, ErrInvalidInput, err.Error(), nil)
 		return
 	}
-
-	// 5. HTML 새니타이제이션 (XSS 방어)
-	input.Content = sanitizer.SanitizeComment(input.Content)
-	input.AuthorName = sanitizer.SanitizeComment(input.AuthorName)
 
 	// 6. 포스트 가져오기 또는 생성 (slug를 title로도 사용)
 	post, err := database.GetOrCreatePost(ctx, h.db, site.ID, slug, slug)
@@ -349,7 +349,10 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. 입력 검증
+	// 4. HTML 태그 제거 (태그를 지운 결과를 검증하기 위해 검증보다 먼저 실행)
+	input.Content = sanitizer.SanitizeComment(input.Content)
+
+	// 5. 입력 검증
 	if err := input.Validate(); err != nil {
 		// 구조화된 검증 에러인 경우 상세 정보 포함
 		if validationErrs, ok := err.(validators.ValidationErrors); ok {
@@ -360,9 +363,6 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, ErrInvalidInput, err.Error(), nil)
 		return
 	}
-
-	// 5. HTML 새니타이제이션 (XSS 방어)
-	input.Content = sanitizer.SanitizeComment(input.Content)
 
 	// 6. 댓글 조회 (비밀번호 포함)
 	comment, err := database.GetCommentByID(ctx, h.db, commentID)
