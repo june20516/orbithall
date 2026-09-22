@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -350,6 +351,280 @@ func TestCreateComment_Fail_ParentNotFound(t *testing.T) {
 	// Then: 404 Not Found 또는 400 Bad Request
 	if rec.Code != http.StatusNotFound && rec.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 404 or 400, got %d", rec.Code)
+	}
+}
+
+func TestCreateComment_PreservesSpecialCharacters(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "special-chars.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+
+	handler := NewCommentHandler(tx)
+
+	// 따옴표, 앰퍼샌드, 부등호, 사용자가 직접 친 엔티티 문자열이 포함된 입력
+	requestBody := map[string]interface{}{
+		"author_name": "Tom & Jerry",
+		"password":    "pass1234",
+		"content":     `I'm & "you" 1 < 2 &amp;`,
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/posts/test-post/comments", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: CreateComment 호출
+	handler.CreateComment(rec, req)
+
+	// Then: 201 Created, 특수문자가 엔티티로 바뀌지 않고 그대로 저장됨
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+
+	var response models.Comment
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if response.Content != `I'm & "you" 1 < 2 &amp;` {
+		t.Errorf("Expected content %q, got %q", `I'm & "you" 1 < 2 &amp;`, response.Content)
+	}
+	if response.AuthorName != "Tom & Jerry" {
+		t.Errorf("Expected author_name %q, got %q", "Tom & Jerry", response.AuthorName)
+	}
+}
+
+func TestCreateComment_Fail_TagOnlyInput(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "tag-only.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+
+	handler := NewCommentHandler(tx)
+
+	tests := []struct {
+		name          string
+		authorName    string
+		content       string
+		expectedField string
+	}{
+		{name: "태그만 있는 본문", authorName: "작성자", content: "<b></b>", expectedField: "content"},
+		{name: "태그를 지우면 공백만 남는 본문", authorName: "작성자", content: "<p> </p>", expectedField: "content"},
+		{name: "태그만 있는 작성자 이름", authorName: "<i></i>", content: "댓글 내용", expectedField: "author_name"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requestBody := map[string]interface{}{
+				"author_name": tt.authorName,
+				"password":    "pass1234",
+				"content":     tt.content,
+			}
+			bodyBytes, _ := json.Marshal(requestBody)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/posts/test-post/comments", bytes.NewBuffer(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("slug", "test-post")
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+			req = req.WithContext(withSiteContext(req.Context(), site))
+
+			rec := httptest.NewRecorder()
+
+			// When: CreateComment 호출
+			handler.CreateComment(rec, req)
+
+			// Then: 400 Bad Request, 해당 필드 검증 에러
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+			}
+
+			var response struct {
+				Error struct {
+					Code    string            `json:"code"`
+					Details map[string]string `json:"details"`
+				} `json:"error"`
+			}
+			json.NewDecoder(rec.Body).Decode(&response)
+
+			if response.Error.Code != ErrInvalidInput {
+				t.Errorf("Expected error code %s, got %s", ErrInvalidInput, response.Error.Code)
+			}
+			if _, exists := response.Error.Details[tt.expectedField]; !exists {
+				t.Errorf("Expected validation error for %q, got %v", tt.expectedField, response.Error.Details)
+			}
+		})
+	}
+}
+
+func TestCreateComment_Fail_ParentInOtherSite(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 다른 사이트의 포스트에 댓글이 존재함
+	otherSite := testhelpers.CreateTestSite(ctx, t, tx, "Other Site", "other-parent.test.com", []string{"http://localhost:3001"}, true)
+	otherPost := testhelpers.CreateTestPost(ctx, t, tx, otherSite.ID, "other-post", "Other Post")
+	otherComment, err := database.CreateComment(ctx, tx, otherPost.ID, nil, "Other", "pass1234", "다른 사이트 댓글", "127.0.0.1", "Agent")
+	if err != nil {
+		t.Fatalf("failed to create comment in other site: %v", err)
+	}
+
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "my-parent.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+
+	handler := NewCommentHandler(tx)
+
+	// 내 사이트의 API 키로 다른 사이트 댓글에 답글 시도
+	requestBody := map[string]interface{}{
+		"author_name": "작성자",
+		"password":    "pass1234",
+		"content":     "답글 내용",
+		"parent_id":   otherComment.ID,
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/posts/test-post/comments", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: CreateComment 호출
+	handler.CreateComment(rec, req)
+
+	// Then: 부모가 없는 것과 똑같이 404 COMMENT_NOT_FOUND
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
+	}
+
+	var response ErrorResponse
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if response.Error.Code != ErrCommentNotFound {
+		t.Errorf("Expected error code %s, got %s", ErrCommentNotFound, response.Error.Code)
+	}
+}
+
+func TestCreateComment_TrimsAuthorName(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "trim-author.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+
+	handler := NewCommentHandler(tx)
+
+	// 앞뒤 공백을 빼면 100자인 작성자 이름 (DB 컬럼은 VARCHAR(100))
+	authorName := strings.Repeat("가", 100)
+	requestBody := map[string]interface{}{
+		"author_name": " " + authorName + "\t",
+		"password":    "pass1234",
+		"content":     "댓글 내용",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/posts/test-post/comments", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: CreateComment 호출
+	handler.CreateComment(rec, req)
+
+	// Then: 201 Created, 앞뒤 공백을 뺀 이름으로 저장됨
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+
+	var response models.Comment
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if response.AuthorName != authorName {
+		t.Errorf("Expected trimmed author_name, got %q", response.AuthorName)
+	}
+}
+
+func TestCreateComment_Fail_BodyTooLarge(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "large-body.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+
+	handler := NewCommentHandler(tx)
+
+	// 태그를 지우면 짧아지지만 요청 본문 크기 제한을 넘는 입력
+	requestBody := map[string]interface{}{
+		"author_name": "작성자",
+		"password":    "pass1234",
+		"content":     "hi" + strings.Repeat("<b></b>", 20000),
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/posts/test-post/comments", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: CreateComment 호출
+	handler.CreateComment(rec, req)
+
+	// Then: 400 Bad Request
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+
+	var response ErrorResponse
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if response.Error.Code != ErrInvalidInput {
+		t.Errorf("Expected error code %s, got %s", ErrInvalidInput, response.Error.Code)
 	}
 }
 
@@ -953,6 +1228,154 @@ func TestUpdateComment_XSS_HTMLSanitization(t *testing.T) {
 	content := response["content"].(string)
 	if content != "Safe content" {
 		t.Errorf("Expected sanitized content 'Safe content', got '%s'", content)
+	}
+}
+
+func TestUpdateComment_Fail_TagOnlyContent(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "tag-only-update.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+
+	handler := NewCommentHandler(tx)
+
+	// 태그만 있는 content로 수정 시도
+	requestBody := map[string]interface{}{
+		"password": "password123",
+		"content":  "<b></b>",
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: UpdateComment 호출
+	handler.UpdateComment(rec, req)
+
+	// Then: 400 Bad Request, 기존 내용은 그대로
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+
+	var response ErrorResponse
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if response.Error.Code != ErrInvalidInput {
+		t.Errorf("Expected error code %s, got %s", ErrInvalidInput, response.Error.Code)
+	}
+
+	stored, _ := database.GetCommentByID(ctx, tx, comment.ID)
+	if stored.Content != "Content" {
+		t.Errorf("Expected content to stay %q, got %q", "Content", stored.Content)
+	}
+}
+
+func TestUpdateComment_PreservesSpecialCharacters(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "special-chars-update.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+
+	handler := NewCommentHandler(tx)
+
+	// 특수문자가 포함된 content로 수정
+	requestBody := map[string]interface{}{
+		"password": "password123",
+		"content":  `I'm & "you" 1 < 2 &amp;`,
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: UpdateComment 호출
+	handler.UpdateComment(rec, req)
+
+	// Then: 200 OK, 특수문자가 그대로 저장됨
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	stored, _ := database.GetCommentByID(ctx, tx, comment.ID)
+	if stored.Content != `I'm & "you" 1 < 2 &amp;` {
+		t.Errorf("Expected content %q, got %q", `I'm & "you" 1 < 2 &amp;`, stored.Content)
+	}
+}
+
+func TestUpdateComment_Fail_BodyTooLarge(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사이트, 포스트, 댓글 생성
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "large-body-update.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+	comment, _ := database.CreateComment(ctx, tx, post.ID, nil, "Author", "password123", "Content", "127.0.0.1", "Agent")
+
+	handler := NewCommentHandler(tx)
+
+	// 태그를 지우면 짧아지지만 요청 본문 크기 제한을 넘는 입력
+	requestBody := map[string]interface{}{
+		"password": "password123",
+		"content":  "hi" + strings.Repeat("<b></b>", 20000),
+	}
+	bodyBytes, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/comments/%d", comment.ID), bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", fmt.Sprintf("%d", comment.ID))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: UpdateComment 호출
+	handler.UpdateComment(rec, req)
+
+	// Then: 400 Bad Request, 기존 내용은 그대로
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+
+	stored, _ := database.GetCommentByID(ctx, tx, comment.ID)
+	if stored.Content != "Content" {
+		t.Errorf("Expected content to stay %q, got %q", "Content", stored.Content)
 	}
 }
 

@@ -36,14 +36,15 @@ func scanComment(row *sql.Row) (*models.Comment, error) {
 // CreateComment는 새로운 댓글을 생성합니다
 // 비밀번호는 bcrypt로 해싱하여 저장하고, 대댓글의 depth를 검증합니다 (1 depth만 허용)
 func CreateComment(ctx context.Context, db DBTX, postID int64, parentID *int64, authorName, password, content, ipAddress, userAgent string) (*models.Comment, error) {
-	// 1단계: 부모 댓글이 있으면 depth 검증 (2depth 금지)
+	// 1단계: 부모 댓글이 있으면 같은 포스트인지와 depth 검증 (2depth 금지)
+	// 다른 포스트(다른 사이트 포함)의 댓글은 부모가 없는 것과 똑같이 취급합니다
 	if parentID != nil {
 		var parentParentID sql.NullInt64
 		err := db.QueryRowContext(ctx, `
 			SELECT parent_id
 			FROM comments
-			WHERE id = $1
-		`, *parentID).Scan(&parentParentID)
+			WHERE id = $1 AND post_id = $2
+		`, *parentID, postID).Scan(&parentParentID)
 
 		if err == sql.ErrNoRows {
 			return nil, ErrParentCommentNotFound
@@ -217,7 +218,7 @@ func ListComments(ctx context.Context, db DBTX, postID int64, limit, offset int)
 
 	// 3단계: 각 최상위 댓글의 대댓글 조회
 	for _, comment := range comments {
-		replies, err := getReplies(ctx, db, comment.ID)
+		replies, err := getReplies(ctx, db, postID, comment.ID)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to get replies for comment %d: %w", comment.ID, err)
 		}
@@ -228,16 +229,17 @@ func ListComments(ctx context.Context, db DBTX, postID int64, limit, offset int)
 }
 
 // getReplies는 특정 댓글의 대댓글 목록을 조회합니다 (비공개 헬퍼 함수)
+// 부모 댓글과 같은 포스트의 대댓글만 조회합니다
 // created_at ASC, id ASC 순으로 정렬됩니다
-func getReplies(ctx context.Context, db DBTX, parentID int64) ([]*models.Comment, error) {
+func getReplies(ctx context.Context, db DBTX, postID, parentID int64) ([]*models.Comment, error) {
 	query := `
 		SELECT id, post_id, parent_id, author_name, author_password, content, ip_address, user_agent, is_deleted, created_at, updated_at, deleted_at
 		FROM comments
-		WHERE parent_id = $1
+		WHERE post_id = $1 AND parent_id = $2
 		ORDER BY created_at ASC, id ASC
 	`
 
-	rows, err := db.QueryContext(ctx, query, parentID)
+	rows, err := db.QueryContext(ctx, query, postID, parentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query replies: %w", err)
 	}
@@ -331,7 +333,7 @@ func GetAdminComments(ctx context.Context, db DBTX, postID int64, limit, offset 
 
 	// 3단계: 각 최상위 댓글의 대댓글 조회 (삭제된 것 포함)
 	for _, comment := range comments {
-		replies, err := getAdminReplies(ctx, db, comment.ID)
+		replies, err := getAdminReplies(ctx, db, postID, comment.ID)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to get replies for comment %d: %w", comment.ID, err)
 		}
@@ -342,15 +344,16 @@ func GetAdminComments(ctx context.Context, db DBTX, postID int64, limit, offset 
 }
 
 // getAdminReplies는 Admin용 대댓글 조회 (삭제된 것 포함, IP 마스킹 없음)
-func getAdminReplies(ctx context.Context, db DBTX, parentID int64) ([]*models.Comment, error) {
+// 부모 댓글과 같은 포스트의 대댓글만 조회합니다
+func getAdminReplies(ctx context.Context, db DBTX, postID, parentID int64) ([]*models.Comment, error) {
 	query := `
 		SELECT id, post_id, parent_id, author_name, author_password, content, ip_address, user_agent, is_deleted, created_at, updated_at, deleted_at
 		FROM comments
-		WHERE parent_id = $1
+		WHERE post_id = $1 AND parent_id = $2
 		ORDER BY created_at ASC, id ASC
 	`
 
-	rows, err := db.QueryContext(ctx, query, parentID)
+	rows, err := db.QueryContext(ctx, query, postID, parentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query replies: %w", err)
 	}
