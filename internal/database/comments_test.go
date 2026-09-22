@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -142,8 +143,8 @@ func TestCreateComment(t *testing.T) {
 		_, err = CreateComment(ctx, tx, postID, &replyCommentID, "Nested Reply", "pass", "Nested", "10.0.0.3", "Agent")
 
 		// Then: 에러 반환 (2depth 금지)
-		if err == nil {
-			t.Fatal("expected error for nested reply (2depth), got nil")
+		if !errors.Is(err, ErrNestedReplyNotAllowed) {
+			t.Fatalf("expected ErrNestedReplyNotAllowed, got: %v", err)
 		}
 	})
 
@@ -160,6 +161,43 @@ func TestCreateComment(t *testing.T) {
 		// Then: 에러 반환
 		if err == nil {
 			t.Fatal("expected error for non-existent parent_id, got nil")
+		}
+	})
+
+	t.Run("같은 사이트의 다른 포스트 댓글을 부모로 지정하면 생성 실패", func(t *testing.T) {
+		// Given: 같은 사이트의 다른 포스트에 댓글이 존재함
+		otherPost := testhelpers.CreateTestPost(ctx, t, tx, siteID, "test-post-other-in-site", "Other Post")
+		otherComment, err := CreateComment(ctx, tx, otherPost.ID, nil, "Other", "pass", "Other content", "10.0.0.1", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create comment in other post: %v", err)
+		}
+		post := testhelpers.CreateTestPost(ctx, t, tx, siteID, "test-post-cross-post", "Test Post")
+
+		// When: 다른 포스트의 댓글에 답글 생성 시도
+		_, err = CreateComment(ctx, tx, post.ID, &otherComment.ID, "Author", "pass", "Reply", "10.0.0.2", "Agent")
+
+		// Then: 부모가 없는 것과 같은 에러
+		if !errors.Is(err, ErrParentCommentNotFound) {
+			t.Fatalf("expected ErrParentCommentNotFound, got: %v", err)
+		}
+	})
+
+	t.Run("다른 사이트 포스트의 댓글을 부모로 지정하면 생성 실패", func(t *testing.T) {
+		// Given: 다른 사이트의 포스트에 댓글이 존재함
+		otherSite := testhelpers.CreateTestSite(ctx, t, tx, "Other Site", "other.com", []string{"http://localhost:3001"}, true)
+		otherPost := testhelpers.CreateTestPost(ctx, t, tx, otherSite.ID, "test-post-other-site", "Other Post")
+		otherComment, err := CreateComment(ctx, tx, otherPost.ID, nil, "Other", "pass", "Other content", "10.0.0.1", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create comment in other site: %v", err)
+		}
+		post := testhelpers.CreateTestPost(ctx, t, tx, siteID, "test-post-cross-site", "Test Post")
+
+		// When: 다른 사이트 댓글에 답글 생성 시도
+		_, err = CreateComment(ctx, tx, post.ID, &otherComment.ID, "Author", "pass", "Reply", "10.0.0.2", "Agent")
+
+		// Then: 부모가 없는 것과 같은 에러
+		if !errors.Is(err, ErrParentCommentNotFound) {
+			t.Fatalf("expected ErrParentCommentNotFound, got: %v", err)
 		}
 	})
 }
@@ -587,6 +625,38 @@ func TestListComments(t *testing.T) {
 			t.Errorf("expected total=0, got %d", total)
 		}
 	})
+
+	t.Run("다른 포스트에 저장된 답글은 대댓글 목록에서 제외", func(t *testing.T) {
+		// Given: 부모 댓글과 다른 포스트로 저장된 답글이 존재함 (포스트 검증 이전에 들어간 데이터)
+		postID := testhelpers.CreateTestPost(ctx, t, tx, siteID, "test-post-foreign-reply", "Test Post").ID
+		otherPostID := testhelpers.CreateTestPost(ctx, t, tx, siteID, "test-post-foreign-origin", "Other Post").ID
+
+		parent, err := CreateComment(ctx, tx, postID, nil, "Parent", "pass", "Parent", "10.0.0.1", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create parent: %v", err)
+		}
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO comments (post_id, parent_id, author_name, author_password, content, ip_address, user_agent, is_deleted)
+			VALUES ($1, $2, 'Foreign', 'pass', 'Foreign reply', '10.0.0.2', 'Agent', FALSE)
+		`, otherPostID, parent.ID)
+		if err != nil {
+			t.Fatalf("failed to insert foreign reply: %v", err)
+		}
+
+		// When: 댓글 목록 조회
+		comments, _, err := ListComments(ctx, tx, postID, 10, 0)
+
+		// Then: 다른 포스트의 답글은 포함되지 않음
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if len(comments) != 1 {
+			t.Fatalf("expected 1 top-level comment, got %d", len(comments))
+		}
+		if len(comments[0].Replies) != 0 {
+			t.Errorf("expected 0 replies, got %d", len(comments[0].Replies))
+		}
+	})
 }
 
 // TestGetAdminComments는 Admin용 댓글 조회 기능을 테스트합니다
@@ -701,6 +771,44 @@ func TestGetAdminComments(t *testing.T) {
 
 		if len(comments) != 0 {
 			t.Errorf("Expected 0 comments, got %d", len(comments))
+		}
+	})
+
+	t.Run("Admin 댓글 조회 - 다른 포스트에 저장된 답글은 제외", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// 부모 댓글과 다른 포스트로 저장된 답글 (포스트 검증 이전에 들어간 데이터)
+		site := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "test.com",
+			[]string{"https://test.com"}, true)
+		post := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "test-post", "Test Post")
+		otherPost := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "other-post", "Other Post")
+
+		parent, err := CreateComment(ctx, tx, post.ID, nil, "Parent", "password123",
+			"Parent", "192.168.1.100", "test-agent")
+		if err != nil {
+			t.Fatalf("Failed to create parent: %v", err)
+		}
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO comments (post_id, parent_id, author_name, author_password, content, ip_address, user_agent, is_deleted)
+			VALUES ($1, $2, 'Foreign', 'pass', 'Foreign reply', '10.0.0.2', 'Agent', FALSE)
+		`, otherPost.ID, parent.ID)
+		if err != nil {
+			t.Fatalf("Failed to insert foreign reply: %v", err)
+		}
+
+		// Admin 댓글 조회
+		comments, _, err := GetAdminComments(ctx, tx, post.ID, 50, 0)
+		if err != nil {
+			t.Fatalf("Failed to get admin comments: %v", err)
+		}
+
+		// 검증
+		if len(comments) != 1 {
+			t.Fatalf("Expected 1 top-level comment, got %d", len(comments))
+		}
+		if len(comments[0].Replies) != 0 {
+			t.Errorf("Expected 0 replies, got %d", len(comments[0].Replies))
 		}
 	})
 }
