@@ -3,6 +3,7 @@ package validators
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // ValidationErrors는 필드명과 에러 메시지를 매핑하는 타입
@@ -32,25 +33,27 @@ type CommentCreateInput struct {
 func (c *CommentCreateInput) Validate() error {
 	errors := make(ValidationErrors)
 
-	// 작성자 이름 검증: 공백 제거 후 1-100자 확인
+	// 작성자 이름 검증: 공백 제거 후 1-100자(글자 수 기준) 확인
 	authorName := strings.TrimSpace(c.AuthorName)
 	if authorName == "" {
 		errors["author_name"] = "Author name is required"
-	} else if len(authorName) > 100 {
+	} else if utf8.RuneCountInString(authorName) > 100 {
 		errors["author_name"] = "Author name must be 100 characters or less"
 	}
 
-	// 비밀번호 검증: 4-50자
+	// 비밀번호 검증: 4-50바이트
+	// 글자 수가 아닌 바이트로 센다. bcrypt는 72바이트를 넘는 비밀번호를 거부하므로
+	// 글자 수로 세면 한글 비밀번호(글자당 3바이트)가 해싱 단계에서 실패한다.
 	if len(c.Password) < 4 {
 		errors["password"] = "Password must be at least 4 characters"
 	} else if len(c.Password) > 50 {
 		errors["password"] = "Password must be 50 characters or less"
 	}
 
-	// 내용 검증: 공백 제거 후 1-10000자 확인
+	// 내용 검증: 공백 제거 후 1-10000자(글자 수 기준) 확인
 	if strings.TrimSpace(c.Content) == "" {
 		errors["content"] = "Content is required"
-	} else if len(c.Content) > 10000 {
+	} else if utf8.RuneCountInString(c.Content) > 10000 {
 		errors["content"] = "Content must be 10000 characters or less"
 	}
 
@@ -81,10 +84,10 @@ func (c *CommentUpdateInput) Validate() error {
 		errors["password"] = "Password is required"
 	}
 
-	// 내용 검증: 공백 제거 후 1-10000자 확인
+	// 내용 검증: 공백 제거 후 1-10000자(글자 수 기준) 확인
 	if strings.TrimSpace(c.Content) == "" {
 		errors["content"] = "Content is required"
-	} else if len(c.Content) > 10000 {
+	} else if utf8.RuneCountInString(c.Content) > 10000 {
 		errors["content"] = "Content must be 10000 characters or less"
 	}
 

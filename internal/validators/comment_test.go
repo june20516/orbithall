@@ -93,6 +93,54 @@ func TestValidateCommentCreate(t *testing.T) {
 			expectedField: "content",
 		},
 		{
+			name: "Korean author name of 100 characters is valid",
+			input: CommentCreateInput{
+				AuthorName: strings.Repeat("가", 100),
+				Password:   "password123",
+				Content:    "This is a test comment",
+			},
+			expectError: false,
+		},
+		{
+			name: "Korean author name over 100 characters",
+			input: CommentCreateInput{
+				AuthorName: strings.Repeat("가", 101),
+				Password:   "password123",
+				Content:    "This is a test comment",
+			},
+			expectError:   true,
+			expectedField: "author_name",
+		},
+		{
+			name: "Korean content of 10000 characters is valid",
+			input: CommentCreateInput{
+				AuthorName: "John Doe",
+				Password:   "password123",
+				Content:    strings.Repeat("가", 10000),
+			},
+			expectError: false,
+		},
+		{
+			name: "Korean content over 10000 characters",
+			input: CommentCreateInput{
+				AuthorName: "John Doe",
+				Password:   "password123",
+				Content:    strings.Repeat("가", 10001),
+			},
+			expectError:   true,
+			expectedField: "content",
+		},
+		{
+			name: "Password length is counted in bytes (17 Korean characters = 51 bytes)",
+			input: CommentCreateInput{
+				AuthorName: "John Doe",
+				Password:   strings.Repeat("가", 17),
+				Content:    "This is a test comment",
+			},
+			expectError:   true,
+			expectedField: "password",
+		},
+		{
 			name: "Valid with parent_id",
 			input: CommentCreateInput{
 				AuthorName: "John Doe",
@@ -189,6 +237,23 @@ func TestValidateCommentUpdate(t *testing.T) {
 			input: CommentUpdateInput{
 				Password: "password123",
 				Content:  strings.Repeat("a", 10001),
+			},
+			expectError:   true,
+			expectedField: "content",
+		},
+		{
+			name: "Korean content of 10000 characters is valid",
+			input: CommentUpdateInput{
+				Password: "password123",
+				Content:  strings.Repeat("가", 10000),
+			},
+			expectError: false,
+		},
+		{
+			name: "Korean content over 10000 characters",
+			input: CommentUpdateInput{
+				Password: "password123",
+				Content:  strings.Repeat("가", 10001),
 			},
 			expectError:   true,
 			expectedField: "content",
