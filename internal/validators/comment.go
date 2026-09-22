@@ -29,7 +29,7 @@ type CommentCreateInput struct {
 }
 
 // Validate는 댓글 생성 입력값을 검증
-// author_name(1-100자), password(4-50자), content(1-10000자), parent_id(양수) 검증
+// author_name(1-100자), password(4-50바이트), content(1-10000자), parent_id(양수) 검증
 func (c *CommentCreateInput) Validate() error {
 	errors := make(ValidationErrors)
 
@@ -45,9 +45,9 @@ func (c *CommentCreateInput) Validate() error {
 	// 글자 수가 아닌 바이트로 센다. bcrypt는 72바이트를 넘는 비밀번호를 거부하므로
 	// 글자 수로 세면 한글 비밀번호(글자당 3바이트)가 해싱 단계에서 실패한다.
 	if len(c.Password) < 4 {
-		errors["password"] = "Password must be at least 4 characters"
+		errors["password"] = "Password must be at least 4 bytes"
 	} else if len(c.Password) > 50 {
-		errors["password"] = "Password must be 50 characters or less"
+		errors["password"] = "Password must be 50 bytes or less"
 	}
 
 	// 내용 검증: 공백 제거 후 1-10000자(글자 수 기준) 확인

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -20,6 +21,11 @@ import (
 
 // EditTimeLimit은 댓글 수정 가능 시간 제한입니다 (30분)
 const EditTimeLimit = 30 * time.Minute
+
+// maxCommentBodyBytes는 댓글 작성/수정 요청 본문의 최대 크기입니다 (128KiB)
+// 본문 10000자(글자당 최대 4바이트)와 JSON 이스케이프를 담고도 남는 크기이며,
+// 검증 전에 실행되는 태그 제거가 큰 입력에 CPU를 쓰지 않도록 요청 단계에서 막습니다
+const maxCommentBodyBytes = 128 << 10
 
 // ============================================
 // CommentHandler 구조체
@@ -132,7 +138,8 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 요청 본문 파싱
+	// 3. 요청 본문 파싱 (크기 제한 초과 시 파싱 에러로 처리)
+	r.Body = http.MaxBytesReader(w, r.Body, maxCommentBodyBytes)
 	var input validators.CommentCreateInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid request body", nil)
@@ -141,7 +148,7 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// 4. HTML 태그 제거 (태그를 지운 결과를 검증하기 위해 검증보다 먼저 실행)
 	input.Content = sanitizer.SanitizeComment(input.Content)
-	input.AuthorName = sanitizer.SanitizeComment(input.AuthorName)
+	input.AuthorName = strings.TrimSpace(sanitizer.SanitizeComment(input.AuthorName))
 
 	// 5. 입력 검증
 	if err := input.Validate(); err != nil {
@@ -342,7 +349,8 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 요청 본문 파싱
+	// 3. 요청 본문 파싱 (크기 제한 초과 시 파싱 에러로 처리)
+	r.Body = http.MaxBytesReader(w, r.Body, maxCommentBodyBytes)
 	var input validators.CommentUpdateInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid request body", nil)
