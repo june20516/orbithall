@@ -952,6 +952,74 @@ func TestGetPostComments(t *testing.T) {
 		}
 	})
 
+	t.Run("삭제된 대댓글도 작성자와 내용 원본 유지", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 사용자와 사이트, 포스트, 살아 있는 댓글 아래의 삭제된 대댓글
+		user := &models.User{
+			Email:    "test@example.com",
+			Name:     "Test User",
+			GoogleID: "google-test",
+		}
+		database.CreateUser(ctx, tx, user)
+
+		site := &models.Site{
+			Name:        "Test Blog",
+			Domain:      "test.com",
+			CORSOrigins: []string{"https://test.com"},
+			IsActive:    true,
+		}
+		database.CreateSiteForUser(ctx, tx, site, user.ID)
+
+		post := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "test-post", "Test Post")
+
+		parent, _ := database.CreateComment(ctx, tx, post.ID, nil, "parent-author", "pass", "parent", "1.1.1.1", "ua")
+		reply, _ := database.CreateComment(ctx, tx, post.ID, &parent.ID, "reply-author", "pass", "deleted reply", "2.2.2.2", "ua")
+		_ = database.DeleteComment(ctx, tx, reply.ID)
+
+		// When: 댓글 조회
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodGet, "/admin/posts/test-post/comments?site_id="+strconv.FormatInt(site.ID, 10), nil)
+		rec := httptest.NewRecorder()
+
+		ctx = context.WithValue(ctx, userContextKey, user)
+		req = req.WithContext(ctx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("slug", "test-post")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		handler.GetPostComments(rec, req)
+
+		// Then: 삭제된 대댓글의 작성자와 내용이 원본 그대로
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+
+		var response struct {
+			Comments []*models.Comment `json:"comments"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		if len(response.Comments) != 1 || len(response.Comments[0].Replies) != 1 {
+			t.Fatalf("Expected 1 comment with 1 reply, got %+v", response.Comments)
+		}
+
+		deletedReply := response.Comments[0].Replies[0]
+		if !deletedReply.IsDeleted {
+			t.Error("Expected reply IsDeleted=true")
+		}
+		if deletedReply.AuthorName != "reply-author" {
+			t.Errorf("Expected original author_name 'reply-author', got '%s'", deletedReply.AuthorName)
+		}
+		if deletedReply.Content != "deleted reply" {
+			t.Errorf("Expected original content 'deleted reply', got '%s'", deletedReply.Content)
+		}
+	})
+
 	t.Run("권한 없음 - 다른 사용자의 사이트", func(t *testing.T) {
 		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
 		defer cleanup()
