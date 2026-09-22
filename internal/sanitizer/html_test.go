@@ -1,6 +1,9 @@
 package sanitizer
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSanitizeComment(t *testing.T) {
 	tests := []struct {
@@ -48,6 +51,61 @@ func TestSanitizeComment(t *testing.T) {
 			input:    "<div><span><b>Nested</b></span></div>",
 			expected: "Nested",
 		},
+		{
+			name:     "Keep apostrophe as is",
+			input:    "I'm happy",
+			expected: "I'm happy",
+		},
+		{
+			name:     "Keep ampersand as is",
+			input:    "Tom & Jerry",
+			expected: "Tom & Jerry",
+		},
+		{
+			name:     "Keep double quotes as is",
+			input:    `"quoted"`,
+			expected: `"quoted"`,
+		},
+		{
+			name:     "Keep less-than sign that is not a tag",
+			input:    "1 < 2",
+			expected: "1 < 2",
+		},
+		{
+			name:     "Keep entity text typed literally by user",
+			input:    "&amp; and &lt;b&gt;",
+			expected: "&amp; and &lt;b&gt;",
+		},
+		{
+			name:     "Remove script tag and keep following text",
+			input:    "<script>alert(1)</script>hi",
+			expected: "hi",
+		},
+		{
+			name:     "Keep special characters around removed tags",
+			input:    "<b>Tom</b> & <i>Jerry's</i>",
+			expected: "Tom & Jerry's",
+		},
+		{
+			name:     "Preserve Korean and emoji",
+			input:    "안녕하세요 😀👍",
+			expected: "안녕하세요 😀👍",
+		},
+		{
+			name:     "Remove tag rebuilt from pieces left after removing inner tag",
+			input:    "<<b>img src=x onerror=alert(1)>",
+			expected: "",
+		},
+		{
+			name:     "Remove script tag rebuilt from pieces",
+			input:    "<<b>script>alert(1)<</b>/script>hi",
+			expected: "hi",
+		},
+		{
+			name:     "Return empty string when tags keep being rebuilt",
+			input:    strings.Repeat("<", 10) + strings.Repeat("b>", 10) + "hi",
+			expected: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -55,6 +113,10 @@ func TestSanitizeComment(t *testing.T) {
 			result := SanitizeComment(tt.input)
 			if result != tt.expected {
 				t.Errorf("SanitizeComment(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+			// Sanitizing the result again must not change it (no tags left)
+			if again := SanitizeComment(result); again != result {
+				t.Errorf("SanitizeComment(%q) = %q, not stable (again: %q)", tt.input, result, again)
 			}
 		})
 	}

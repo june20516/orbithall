@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -20,6 +21,11 @@ import (
 
 // EditTimeLimit은 댓글 수정 가능 시간 제한입니다 (30분)
 const EditTimeLimit = 30 * time.Minute
+
+// maxCommentBodyBytes는 댓글 작성/수정 요청 본문의 최대 크기입니다 (128KiB)
+// 본문 10000자(글자당 최대 4바이트)와 JSON 이스케이프를 담고도 남는 크기이며,
+// 검증 전에 실행되는 태그 제거가 큰 입력에 CPU를 쓰지 않도록 요청 단계에서 막습니다
+const maxCommentBodyBytes = 128 << 10
 
 // ============================================
 // CommentHandler 구조체
@@ -132,14 +138,19 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 요청 본문 파싱
+	// 3. 요청 본문 파싱 (크기 제한 초과 시 파싱 에러로 처리)
+	r.Body = http.MaxBytesReader(w, r.Body, maxCommentBodyBytes)
 	var input validators.CommentCreateInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid request body", nil)
 		return
 	}
 
-	// 4. 입력 검증
+	// 4. HTML 태그 제거 (태그를 지운 결과를 검증하기 위해 검증보다 먼저 실행)
+	input.Content = sanitizer.SanitizeComment(input.Content)
+	input.AuthorName = strings.TrimSpace(sanitizer.SanitizeComment(input.AuthorName))
+
+	// 5. 입력 검증
 	if err := input.Validate(); err != nil {
 		// 구조화된 검증 에러인 경우 상세 정보 포함
 		if validationErrs, ok := err.(validators.ValidationErrors); ok {
@@ -150,10 +161,6 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, ErrInvalidInput, err.Error(), nil)
 		return
 	}
-
-	// 5. HTML 새니타이제이션 (XSS 방어)
-	input.Content = sanitizer.SanitizeComment(input.Content)
-	input.AuthorName = sanitizer.SanitizeComment(input.AuthorName)
 
 	// 6. 포스트 가져오기 또는 생성 (slug를 title로도 사용)
 	post, err := database.GetOrCreatePost(ctx, h.db, site.ID, slug, slug)
@@ -342,14 +349,18 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 요청 본문 파싱
+	// 3. 요청 본문 파싱 (크기 제한 초과 시 파싱 에러로 처리)
+	r.Body = http.MaxBytesReader(w, r.Body, maxCommentBodyBytes)
 	var input validators.CommentUpdateInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid request body", nil)
 		return
 	}
 
-	// 4. 입력 검증
+	// 4. HTML 태그 제거 (태그를 지운 결과를 검증하기 위해 검증보다 먼저 실행)
+	input.Content = sanitizer.SanitizeComment(input.Content)
+
+	// 5. 입력 검증
 	if err := input.Validate(); err != nil {
 		// 구조화된 검증 에러인 경우 상세 정보 포함
 		if validationErrs, ok := err.(validators.ValidationErrors); ok {
@@ -360,9 +371,6 @@ func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, ErrInvalidInput, err.Error(), nil)
 		return
 	}
-
-	// 5. HTML 새니타이제이션 (XSS 방어)
-	input.Content = sanitizer.SanitizeComment(input.Content)
 
 	// 6. 댓글 조회 (비밀번호 포함)
 	comment, err := database.GetCommentByID(ctx, h.db, commentID)

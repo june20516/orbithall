@@ -31,3 +31,6 @@
 
 ## 예상 시간
 2-3시간
+
+## 관련 과제
+- 어드민 대응: orbithall-admin `docs/pending/domain-verification-ui.md`
