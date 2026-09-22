@@ -1,150 +1,137 @@
 #!/usr/bin/env bun
 
-// 버전별 배포 스크립트
-// package.json의 version을 읽어서 v{version} 브랜치에 main 브랜치 코드를 빌드/배포
-// 사용법: bun run scripts/publish.js
+// 위젯 릴리스 스크립트 (ADR-007)
+// origin/main 최신 코드를 빌드하고, 빌드 결과물만 추가한 릴리스 커밋에 v{version} 태그를 붙여 태그만 push한다.
+// 릴리스 커밋은 어느 브랜치에도 머지하지 않는다.
+// 사용법: bun run publish (작업 도중이 아니라 배포만을 목적으로, 깨끗한 작업 트리에서 실행)
 
 import { $ } from "bun";
-import pkg from "../package.json";
 
-// package.json의 version에서 배포 브랜치 이름 생성
-const version = pkg.version;
-const targetBranch = `widget/v${version}`;
+const REPO = "june20516/orbithall";
+const BUILD_OUTPUTS = ["../static/embed.js", "../static/embed.css"];
 
-console.log(`\n📌 Publishing version: ${version}`);
-console.log(`📍 Target branch: ${targetBranch}`);
+// git 상태를 바꾸기 전에 모든 중단 조건을 검사하고, 배포할 버전과 태그를 돌려준다
+async function checkPreconditions() {
+  const workingTreeStatus = await $`git status --porcelain`.text();
+  if (workingTreeStatus.trim()) {
+    throw new Error(
+      `작업 트리에 변경사항이 있습니다. 커밋하거나 되돌린 뒤 실행하세요.\n${workingTreeStatus}`
+    );
+  }
+
+  const apiUrl = process.env.ORB_PUBLIC_API_URL;
+  if (!apiUrl) {
+    throw new Error(
+      "ORB_PUBLIC_API_URL이 비어 있습니다. .env.production을 읽는 `bun run publish`로 실행하세요."
+    );
+  }
+  console.log(`🔗 빌드에 들어갈 API URL: ${apiUrl}`);
+
+  await $`git fetch origin`;
+
+  const mainPackageJson =
+    await $`git show origin/main:widget/package.json`.text();
+  const version = JSON.parse(mainPackageJson).version;
+  const tag = `v${version}`;
+  console.log(`📌 배포 버전: ${version} (origin/main 기준)`);
+
+  const localTag = await $`git rev-parse -q --verify refs/tags/${tag}`
+    .nothrow()
+    .quiet();
+  const remoteTag = await $`git ls-remote --tags origin refs/tags/${tag}`.text();
+  if (localTag.exitCode === 0 || remoteTag.trim()) {
+    throw new Error(
+      `${tag} 태그가 이미 있습니다. 한 번 낸 버전은 다시 내지 않습니다. widget/package.json 버전을 올려 main에 반영한 뒤 실행하세요.`
+    );
+  }
+
+  return { version, tag };
+}
+
+// 현재 위치: 브랜치 이름, detached HEAD면 커밋 해시
+async function getCurrentLocation() {
+  const branch = (await $`git branch --show-current`.text()).trim();
+  if (branch) {
+    return branch;
+  }
+  return (await $`git rev-parse HEAD`.text()).trim();
+}
+
+// origin/main 위에 빌드 결과물만 추가한 릴리스 커밋을 만들고 태그를 붙인다
+async function createReleaseCommit(tag) {
+  console.log("\n🔄 origin/main으로 전환 (detached)");
+  await $`git checkout --detach origin/main`;
+
+  console.log("\n📦 빌드");
+  await $`bun run build`;
+
+  await $`git add -f ${BUILD_OUTPUTS}`;
+  await $`git commit -m ${`build: widget ${tag} [skip ci]`}`;
+  await $`git tag -a ${tag} -m ${`widget ${tag}`}`;
+  console.log(`\n🏷️  릴리스 커밋에 ${tag} 태그를 붙였습니다`);
+}
+
+// 태그만 push한다. 실패하면 로컬 태그를 지워 다시 실행할 수 있게 한다
+async function pushTag(tag) {
+  console.log(`\n📤 ${tag} 태그 push`);
+  const result = await $`git push origin refs/tags/${tag}`.nothrow();
+  if (result.exitCode !== 0) {
+    await $`git tag -d ${tag}`;
+    throw new Error(
+      `${tag} 태그 push에 실패해 로컬 태그를 지웠습니다. 원인을 해결한 뒤 다시 실행하세요.`
+    );
+  }
+}
+
+async function returnTo(location) {
+  if ((await getCurrentLocation()) === location) {
+    return;
+  }
+  const result = await $`git checkout ${location}`.nothrow();
+  if (result.exitCode === 0) {
+    console.log(`\n↩️  ${location}(으)로 돌아왔습니다`);
+  } else {
+    console.error(
+      `\n⚠️  ${location}(으)로 돌아가지 못했습니다. 직접 checkout 하세요.`
+    );
+  }
+}
+
+function printCdnUrls(version) {
+  const major = version.split(".")[0];
+  const files = ["embed.js", "embed.css"];
+
+  console.log(`\n✨ v${version} 배포 완료`);
+  console.log("\n📍 고정 버전 (권장, 1년 불변 캐시):");
+  for (const file of files) {
+    console.log(`https://cdn.jsdelivr.net/gh/${REPO}@${version}/static/${file}`);
+  }
+  console.log(
+    `\n📍 범위 버전 @${major} (새 버전 반영이 CDN 최대 12시간, 브라우저 최대 7일 늦음):`
+  );
+  for (const file of files) {
+    console.log(`https://cdn.jsdelivr.net/gh/${REPO}@${major}/static/${file}`);
+  }
+  console.log(
+    "\n📝 README.md, widget/README.md, docs/specs/widget-integration-guide.md의 설치 주소 버전을 갱신하세요."
+  );
+}
 
 async function publish() {
-  let stashed = false;
-  let currentBranch = "";
+  let originalLocation = "";
 
   try {
-    // 1. 현재 브랜치 저장
-    currentBranch = (await $`git branch --show-current`.text()).trim();
-    console.log(`\n📍 Current branch: ${currentBranch}`);
-
-    // 2. publish.js가 수정되어 있는지 확인
-    const publishJsStatus =
-      await $`git status --porcelain scripts/publish.js`.text();
-    if (publishJsStatus.trim()) {
-      console.error("\n❌ Error: scripts/publish.js has uncommitted changes");
-      console.error(
-        "Please commit or discard changes to publish.js before running publish"
-      );
-      process.exit(1);
-    }
-
-    // 3. 워킹 디렉토리에 변경사항이 있으면 stash
-    const statusCheck = await $`git status --porcelain`.text();
-    if (statusCheck.trim()) {
-      console.log(`\n💾 Stashing current changes...`);
-      await $`git stash push -m "publish script auto-stash"`;
-      stashed = true;
-      console.log("✅ Changes stashed");
-    }
-
-    // 4. main 브랜치로 전환
-    console.log(`\n🔄 Switching to main branch...`);
-    await $`git checkout main`;
-    await $`git pull origin main`;
-    console.log("✅ Updated to latest main");
-
-    // 5. 빌드 실행 (production 환경으로 직접 빌드)
-    console.log(`\n📦 Building widget for version ${version}...`);
-    await $`bun run build`;
-    console.log("✅ Build complete");
-
-    // 6. 타겟 브랜치가 이미 존재하는지 확인 (로컬 또는 리모트)
-    const localBranchExists = await $`git rev-parse --verify ${targetBranch}`
-      .nothrow()
-      .quiet();
-    const remoteBranchExists =
-      await $`git ls-remote --heads origin ${targetBranch}`.nothrow().quiet();
-
-    if (
-      localBranchExists.exitCode === 0 ||
-      remoteBranchExists.stdout.toString().trim()
-    ) {
-      console.error(
-        `\n❌ Error: Version ${version} (${targetBranch}) is already published`
-      );
-      console.error("\n⚠️  This version has already been deployed.");
-      console.error("\nOptions:");
-      console.error(
-        `  1. Bump version in package.json (e.g., ${version} -> 1.0.1)`
-      );
-      console.error("  2. If you really want to re-deploy this version:");
-      console.error(
-        `     - Delete local branch: git branch -D ${targetBranch}`
-      );
-      console.error(
-        `     - Delete remote branch: git push origin --delete ${targetBranch}`
-      );
-      console.error("     - Run publish again");
-      process.exit(1);
-    }
-
-    // 7. 새 브랜치 생성
-    console.log(`\n🆕 Creating new ${targetBranch} branch from main...`);
-    await $`git checkout -b ${targetBranch}`;
-
-    // 8. static 디렉토리 변경사항 스테이징
-    await $`git add ../static/embed.js ../static/embed.css`;
-    console.log("✅ Staged embed.js and embed.css");
-
-    // 9. 변경사항이 있는 경우에만 커밋
-    const status = await $`git status --porcelain`.text();
-    if (status.trim()) {
-      const commitMessage = `build: update widget v${version} [skip ci]`;
-      await $`git commit -m ${commitMessage}`;
-      console.log(`✅ Committed: ${commitMessage}`);
-    } else {
-      console.log("⚠️  No changes to commit");
-    }
-
-    // 10. Push
-    console.log(`\n📤 Pushing to ${targetBranch}...`);
-    await $`git push origin ${targetBranch} --force`;
-
-    console.log("\n✨ Publish complete!");
-    console.log(`\n📍 CDN URLs:`);
-    console.log(
-      `https://cdn.jsdelivr.net/gh/june20516/orbithall@${targetBranch}/static/embed.js`
-    );
-    console.log(
-      `https://cdn.jsdelivr.net/gh/june20516/orbithall@${targetBranch}/static/embed.css`
-    );
+    const { version, tag } = await checkPreconditions();
+    originalLocation = await getCurrentLocation();
+    await createReleaseCommit(tag);
+    await pushTag(tag);
+    printCdnUrls(version);
   } catch (error) {
-    console.error("\n❌ Publish failed:", error.message);
-    process.exit(1);
+    console.error(`\n❌ 배포 중단: ${error.message}`);
+    process.exitCode = 1;
   } finally {
-    // 11. 항상 원래 브랜치로 복귀 시도
-    if (currentBranch) {
-      try {
-        const current = (await $`git branch --show-current`.text()).trim();
-        if (current !== currentBranch) {
-          console.log(`\n🔄 Returning to ${currentBranch}...`);
-          await $`git checkout ${currentBranch}`;
-          console.log(`✅ Switched back to ${currentBranch}`);
-        }
-      } catch (checkoutError) {
-        console.error(
-          `⚠️  Could not return to ${currentBranch}. Please checkout manually.`
-        );
-      }
-    }
-
-    // 12. 항상 stash 복원 시도
-    if (stashed) {
-      try {
-        console.log(`\n📦 Restoring stashed changes...`);
-        await $`git stash pop`;
-        console.log("✅ Changes restored");
-      } catch (stashError) {
-        console.error(
-          "⚠️  Could not restore stash automatically. Run: git stash pop"
-        );
-      }
+    if (originalLocation) {
+      await returnTo(originalLocation);
     }
   }
 }
