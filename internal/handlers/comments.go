@@ -52,9 +52,9 @@ func NewCommentHandler(db database.DBTX) *CommentHandler {
 // filterDeletedCommentsAndMaskIP는 삭제된 댓글을 필터링하고 모든 댓글의 IP를 마스킹합니다
 //
 // 삭제된 최상위 댓글의 필터링 규칙 (Soft Delete 방식):
-//   - 대댓글이 있는 삭제된 댓글: 계층 구조 유지를 위해 응답에 포함
+//   - 삭제되지 않은 대댓글이 있는 삭제된 댓글: 계층 구조 유지를 위해 응답에 포함
 //     (author_name과 content는 빈 문자열, isDeleted=true로 클라이언트가 판단)
-//   - 대댓글이 없는 삭제된 댓글: 응답 배열에서 완전히 제거
+//   - 삭제되지 않은 대댓글이 없는 삭제된 댓글: 대댓글째 응답 배열에서 완전히 제거
 //
 // 삭제된 대댓글: 응답에 포함하되 author_name과 content는 빈 문자열
 //
