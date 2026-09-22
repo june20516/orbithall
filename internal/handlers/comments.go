@@ -51,10 +51,12 @@ func NewCommentHandler(db database.DBTX) *CommentHandler {
 
 // filterDeletedCommentsAndMaskIP는 삭제된 댓글을 필터링하고 모든 댓글의 IP를 마스킹합니다
 //
-// 삭제된 댓글의 필터링 규칙 (Soft Delete 방식):
+// 삭제된 최상위 댓글의 필터링 규칙 (Soft Delete 방식):
 //   - 대댓글이 있는 삭제된 댓글: 계층 구조 유지를 위해 응답에 포함
 //     (author_name과 content는 빈 문자열, isDeleted=true로 클라이언트가 판단)
 //   - 대댓글이 없는 삭제된 댓글: 응답 배열에서 완전히 제거
+//
+// 삭제된 대댓글: 응답에 포함하되 author_name과 content는 빈 문자열
 //
 // IP 마스킹: 모든 댓글의 IP 주소를 부분 마스킹 (예: 192.168.***.***)
 func filterDeletedCommentsAndMaskIP(comments []*models.Comment) []*models.Comment {
@@ -77,11 +79,7 @@ func filterDeletedCommentsAndMaskIP(comments []*models.Comment) []*models.Commen
 				comment.AuthorName = ""
 				comment.Content = ""
 				comment.IPAddressMasked = models.MaskIPAddress(comment.IPAddress)
-
-				// 대댓글들의 IP 마스킹
-				for j := range comment.Replies {
-					comment.Replies[j].IPAddressMasked = models.MaskIPAddress(comment.Replies[j].IPAddress)
-				}
+				hideDeletedRepliesAndMaskIP(comment.Replies)
 
 				filtered = append(filtered, comment)
 			}
@@ -89,17 +87,25 @@ func filterDeletedCommentsAndMaskIP(comments []*models.Comment) []*models.Commen
 		} else {
 			// 삭제되지 않은 댓글: IP 마스킹만 수행
 			comment.IPAddressMasked = models.MaskIPAddress(comment.IPAddress)
-
-			// 대댓글들의 IP 마스킹
-			for j := range comment.Replies {
-				comment.Replies[j].IPAddressMasked = models.MaskIPAddress(comment.Replies[j].IPAddress)
-			}
+			hideDeletedRepliesAndMaskIP(comment.Replies)
 
 			filtered = append(filtered, comment)
 		}
 	}
 
 	return filtered
+}
+
+// hideDeletedRepliesAndMaskIP는 삭제된 대댓글의 작성자와 내용을 비우고, 모든 대댓글의 IP를 마스킹합니다
+func hideDeletedRepliesAndMaskIP(replies []*models.Comment) {
+	for _, reply := range replies {
+		if reply.IsDeleted {
+			// 삭제된 대댓글의 내용은 비움 (클라이언트가 isDeleted 플래그로 판단)
+			reply.AuthorName = ""
+			reply.Content = ""
+		}
+		reply.IPAddressMasked = models.MaskIPAddress(reply.IPAddress)
+	}
 }
 
 // ============================================

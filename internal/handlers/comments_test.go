@@ -919,6 +919,167 @@ func TestListComments_DeletedComments(t *testing.T) {
 	// alone은 대댓글이 없으므로 목록에서 완전히 제외됨
 }
 
+func TestListComments_DeletedReplyUnderActiveParent(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 살아 있는 부모 댓글 아래에 삭제된 대댓글
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "deleted-reply.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+
+	parent, _ := database.CreateComment(ctx, tx, post.ID, nil, "Parent", "pass123", "부모 댓글", "127.0.0.1", "Agent")
+	reply, _ := database.CreateComment(ctx, tx, post.ID, &parent.ID, "Child", "pass123", "삭제될 대댓글", "127.0.0.1", "Agent")
+
+	database.DeleteComment(ctx, tx, reply.ID)
+
+	handler := NewCommentHandler(tx)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments", nil)
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: ListComments 호출
+	handler.ListComments(rec, req)
+
+	// Then: 200 OK
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var response struct {
+		Comments []struct {
+			AuthorName string `json:"author_name"`
+			Content    string `json:"content"`
+			IsDeleted  bool   `json:"is_deleted"`
+			Replies    []struct {
+				AuthorName string `json:"author_name"`
+				Content    string `json:"content"`
+				IsDeleted  bool   `json:"is_deleted"`
+			} `json:"replies"`
+		} `json:"comments"`
+	}
+
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if len(response.Comments) != 1 || len(response.Comments[0].Replies) != 1 {
+		t.Fatalf("Expected 1 comment with 1 reply, got %+v", response.Comments)
+	}
+
+	// 살아 있는 부모 댓글은 원본 그대로
+	if response.Comments[0].AuthorName != "Parent" || response.Comments[0].Content != "부모 댓글" {
+		t.Errorf("Expected parent to keep original values, got %+v", response.Comments[0])
+	}
+
+	// 삭제된 대댓글은 author_name과 content가 빈 문자열
+	deletedReply := response.Comments[0].Replies[0]
+	if !deletedReply.IsDeleted {
+		t.Error("Expected reply is_deleted true")
+	}
+	if deletedReply.AuthorName != "" {
+		t.Errorf("Expected deleted reply author_name empty string, got '%s'", deletedReply.AuthorName)
+	}
+	if deletedReply.Content != "" {
+		t.Errorf("Expected deleted reply content empty string, got '%s'", deletedReply.Content)
+	}
+}
+
+func TestListComments_MixedRepliesUnderDeletedParent(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 삭제된 부모 댓글 아래에 삭제된 대댓글과 살아 있는 대댓글
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "mixed-replies.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+
+	parent, _ := database.CreateComment(ctx, tx, post.ID, nil, "Parent", "pass123", "부모 댓글", "127.0.0.1", "Agent")
+	deletedReply, _ := database.CreateComment(ctx, tx, post.ID, &parent.ID, "DeletedChild", "pass123", "삭제될 대댓글", "127.0.0.1", "Agent")
+	database.CreateComment(ctx, tx, post.ID, &parent.ID, "ActiveChild", "pass123", "살아 있는 대댓글", "127.0.0.1", "Agent")
+
+	database.DeleteComment(ctx, tx, parent.ID)
+	database.DeleteComment(ctx, tx, deletedReply.ID)
+
+	handler := NewCommentHandler(tx)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments", nil)
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+
+	rec := httptest.NewRecorder()
+
+	// When: ListComments 호출
+	handler.ListComments(rec, req)
+
+	// Then: 200 OK
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var response struct {
+		Comments []struct {
+			AuthorName string `json:"author_name"`
+			Content    string `json:"content"`
+			IsDeleted  bool   `json:"is_deleted"`
+			Replies    []struct {
+				AuthorName string `json:"author_name"`
+				Content    string `json:"content"`
+				IsDeleted  bool   `json:"is_deleted"`
+			} `json:"replies"`
+		} `json:"comments"`
+	}
+
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// 살아 있는 대댓글이 있으므로 삭제된 부모도 계층 구조 유지를 위해 포함
+	if len(response.Comments) != 1 || len(response.Comments[0].Replies) != 2 {
+		t.Fatalf("Expected 1 comment with 2 replies, got %+v", response.Comments)
+	}
+
+	deletedParent := response.Comments[0]
+	if !deletedParent.IsDeleted || deletedParent.AuthorName != "" || deletedParent.Content != "" {
+		t.Errorf("Expected deleted parent with empty values, got %+v", deletedParent)
+	}
+
+	// 삭제된 대댓글은 author_name과 content가 빈 문자열
+	deletedChild := deletedParent.Replies[0]
+	if !deletedChild.IsDeleted {
+		t.Error("Expected first reply is_deleted true")
+	}
+	if deletedChild.AuthorName != "" {
+		t.Errorf("Expected deleted reply author_name empty string, got '%s'", deletedChild.AuthorName)
+	}
+	if deletedChild.Content != "" {
+		t.Errorf("Expected deleted reply content empty string, got '%s'", deletedChild.Content)
+	}
+
+	// 살아 있는 대댓글은 원본 그대로
+	activeChild := deletedParent.Replies[1]
+	if activeChild.IsDeleted || activeChild.AuthorName != "ActiveChild" || activeChild.Content != "살아 있는 대댓글" {
+		t.Errorf("Expected active reply to keep original values, got %+v", activeChild)
+	}
+}
+
 // ============================================
 // UpdateComment 테스트
 // ============================================
