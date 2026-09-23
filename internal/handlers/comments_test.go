@@ -655,7 +655,7 @@ func TestListComments_Success_TreeStructure(t *testing.T) {
 	handler := NewCommentHandler(tx)
 
 	// HTTP 요청 생성
-	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?page=1&limit=50", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?page=1&limit=50&direction=asc", nil)
 	req.Header.Set("X-Orbithall-API-Key", apiKey)
 
 	// Chi URL 파라미터 설정
@@ -747,7 +747,7 @@ func TestListComments_Success_Pagination(t *testing.T) {
 	handler := NewCommentHandler(tx)
 
 	// limit=2로 첫 페이지 조회
-	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?page=1&limit=2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?page=1&limit=2&direction=asc", nil)
 	req.Header.Set("X-Orbithall-API-Key", apiKey)
 
 	rctx := chi.NewRouteContext()
@@ -867,7 +867,7 @@ func TestListComments_DeletedComments(t *testing.T) {
 
 	handler := NewCommentHandler(tx)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?direction=asc", nil)
 	req.Header.Set("X-Orbithall-API-Key", apiKey)
 
 	rctx := chi.NewRouteContext()
@@ -938,7 +938,7 @@ func TestListComments_DeletedReplyUnderActiveParent(t *testing.T) {
 
 	handler := NewCommentHandler(tx)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?direction=asc", nil)
 	req.Header.Set("X-Orbithall-API-Key", apiKey)
 
 	rctx := chi.NewRouteContext()
@@ -1016,7 +1016,7 @@ func TestListComments_MixedRepliesUnderDeletedParent(t *testing.T) {
 
 	handler := NewCommentHandler(tx)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?direction=asc", nil)
 	req.Header.Set("X-Orbithall-API-Key", apiKey)
 
 	rctx := chi.NewRouteContext()
@@ -1077,6 +1077,113 @@ func TestListComments_MixedRepliesUnderDeletedParent(t *testing.T) {
 	activeChild := deletedParent.Replies[1]
 	if activeChild.IsDeleted || activeChild.AuthorName != "ActiveChild" || activeChild.Content != "살아 있는 대댓글" {
 		t.Errorf("Expected active reply to keep original values, got %+v", activeChild)
+	}
+}
+
+func TestListComments_DefaultDirectionIsNewestFirst(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 최상위 댓글 2개
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "sort.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+
+	database.CreateComment(ctx, tx, post.ID, nil, "Author1", "pass", "First", "10.0.0.1", "Agent")
+	database.CreateComment(ctx, tx, post.ID, nil, "Author2", "pass", "Second", "10.0.0.2", "Agent")
+
+	handler := NewCommentHandler(tx)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments", nil)
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+	rec := httptest.NewRecorder()
+
+	// When: 정렬 파라미터 없이 조회
+	handler.ListComments(rec, req)
+
+	// Then: 최신 댓글이 먼저 오고 응답에 적용된 정렬이 담긴다
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var response struct {
+		Comments []struct {
+			Content string `json:"content"`
+		} `json:"comments"`
+		Sort      string `json:"sort"`
+		Direction string `json:"direction"`
+	}
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if len(response.Comments) != 2 {
+		t.Fatalf("Expected 2 comments, got %d", len(response.Comments))
+	}
+	if response.Comments[0].Content != "Second" {
+		t.Errorf("Expected newest comment first, got %q", response.Comments[0].Content)
+	}
+	if response.Sort != "created_at" {
+		t.Errorf("Expected sort created_at, got %q", response.Sort)
+	}
+	if response.Direction != "desc" {
+		t.Errorf("Expected direction desc, got %q", response.Direction)
+	}
+}
+
+func TestListComments_InvalidSortParameters(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "invalid-sort.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+
+	handler := NewCommentHandler(tx)
+
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{name: "알 수 없는 정렬 기준", query: "?sort=author_name"},
+		{name: "알 수 없는 정렬 방향", query: "?direction=descending"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments"+tc.query, nil)
+			req.Header.Set("X-Orbithall-API-Key", apiKey)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("slug", "test-post")
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+			req = req.WithContext(withSiteContext(req.Context(), site))
+			rec := httptest.NewRecorder()
+
+			handler.ListComments(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+			}
+
+			var response struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			json.NewDecoder(rec.Body).Decode(&response)
+
+			if response.Error.Code != ErrInvalidInput {
+				t.Errorf("Expected error code %s, got %s", ErrInvalidInput, response.Error.Code)
+			}
+		})
 	}
 }
 

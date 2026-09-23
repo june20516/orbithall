@@ -112,6 +112,31 @@ func hideDeletedRepliesAndMaskIP(replies []*models.Comment) {
 	}
 }
 
+// 공개 댓글 목록에서 허용하는 정렬 기준
+const commentSortCreatedAt = "created_at"
+
+// parseCommentSort는 sort/direction 쿼리 파라미터를 검증해 돌려줍니다.
+// 값이 없으면 기본값(created_at, desc)을 쓰고, 허용하지 않는 값이면 어떤 파라미터가 문제인지 알려줍니다.
+func parseCommentSort(r *http.Request) (string, database.SortDirection, map[string]string) {
+	sortField := r.URL.Query().Get("sort")
+	if sortField == "" {
+		sortField = commentSortCreatedAt
+	}
+	if sortField != commentSortCreatedAt {
+		return "", "", map[string]string{"sort": "supported values: created_at"}
+	}
+
+	direction := database.SortDirection(r.URL.Query().Get("direction"))
+	if direction == "" {
+		direction = database.SortDesc
+	}
+	if direction != database.SortAsc && direction != database.SortDesc {
+		return "", "", map[string]string{"direction": "supported values: asc, desc"}
+	}
+
+	return sortField, direction, nil
+}
+
 // ============================================
 // HTTP 핸들러 메서드
 // ============================================
@@ -242,6 +267,8 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 // @Param slug path string true "Post Slug"
 // @Param page query int false "페이지 번호 (기본값: 1)"
 // @Param limit query int false "페이지당 댓글 수 (기본값: 50, 최대: 100)"
+// @Param sort query string false "정렬 기준 (created_at)" default(created_at)
+// @Param direction query string false "정렬 방향 (desc: 최신순, asc: 오래된 순)" Enums(asc, desc) default(desc)
 // @Success 200 {object} object{comments=[]models.Comment,pagination=object{current_page=int,total_pages=int,total_comments=int,per_page=int}} "댓글 목록 조회 성공"
 // @Failure 400 {object} object{error=object{code=string,message=string}} "INVALID_INPUT - slug 누락" example({"error":{"code":"INVALID_INPUT","message":"Post slug is required"}})
 // @Failure 401 {object} object{error=object{code=string,message=string}} "MISSING_API_KEY - API 키 헤더 누락" example({"error":{"code":"MISSING_API_KEY","message":"API key is required"}})
@@ -276,6 +303,13 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 
+	// 정렬 파라미터 파싱 (기본값: created_at, desc)
+	sortField, direction, sortErr := parseCommentSort(r)
+	if sortErr != nil {
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid sort parameter", sortErr)
+		return
+	}
+
 	// 4. 포스트 조회 (없으면 빈 배열 반환)
 	post, err := database.GetPostBySlug(ctx, h.db, site.ID, slug)
 	if err != nil {
@@ -286,7 +320,9 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	// 포스트가 없으면 빈 배열 반환
 	if post == nil {
 		respondJSON(w, http.StatusOK, map[string]interface{}{
-			"comments": []models.Comment{},
+			"comments":  []models.Comment{},
+			"sort":      sortField,
+			"direction": string(direction),
 			"pagination": map[string]interface{}{
 				"current_page":   page,
 				"total_pages":    0,
@@ -301,7 +337,7 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 
 	// 6. 댓글 목록 조회 (2-level 트리 구조)
-	comments, totalCount, err := database.ListComments(ctx, h.db, post.ID, limit, offset, database.SortAsc)
+	comments, totalCount, err := database.ListComments(ctx, h.db, post.ID, limit, offset, direction)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to list comments", nil)
 		return
@@ -316,7 +352,9 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 	// 9. 응답
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"comments": comments,
+		"comments":  comments,
+		"sort":      sortField,
+		"direction": string(direction),
 		"pagination": map[string]interface{}{
 			"current_page":   page,
 			"total_pages":    totalPages,
