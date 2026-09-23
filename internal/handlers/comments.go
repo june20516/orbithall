@@ -59,6 +59,10 @@ func NewCommentHandler(db database.DBTX) *CommentHandler {
 // 삭제된 대댓글: 응답에 포함하되 author_name과 content는 빈 문자열
 //
 // IP 마스킹: 모든 댓글의 IP 주소를 부분 마스킹 (예: 192.168.***.***)
+//
+// 이 제거 조건은 database.visibleTopLevelCondition과 같아야 합니다. 총 개수와 페이지 수는
+// 이미 그 SQL 조건으로 계산되어 있으므로, 여기서 일어나는 제거는 방어적 중복입니다
+// (정상 흐름에서는 여기 걸리는 댓글이 이미 쿼리 단계에서 빠져 있어야 합니다).
 func filterDeletedCommentsAndMaskIP(comments []*models.Comment) []*models.Comment {
 	filtered := make([]*models.Comment, 0, len(comments))
 

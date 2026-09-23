@@ -20,21 +20,30 @@ const (
 )
 
 // topLevelOrderBy는 정렬 방향에 맞는 ORDER BY 절을 돌려줍니다.
-// created_at만으로는 같은 트랜잭션에서 만든 댓글의 순서가 흔들리므로 id를 함께 씁니다 (ADR-004).
+// c.created_at만으로는 같은 트랜잭션에서 만든 댓글의 순서가 흔들리므로 c.id를 함께 씁니다 (ADR-004).
+// visibleTopLevelCondition과 같은 쿼리에서 쓰이므로 별칭 c를 그대로 맞춥니다.
 func topLevelOrderBy(direction SortDirection) string {
 	if direction == SortDesc {
-		return "ORDER BY created_at DESC, id DESC"
+		return "ORDER BY c.created_at DESC, c.id DESC"
 	}
-	return "ORDER BY created_at ASC, id ASC"
+	return "ORDER BY c.created_at ASC, c.id ASC"
 }
 
 // visibleTopLevelCondition은 공개 목록에 보이는 최상위 댓글 조건입니다.
 // 삭제됐고 살아 있는 대댓글도 없는 댓글은 응답에서 제외되므로, 개수와 페이지 계산에서도 빼야 합니다.
+// 이 기준은 핸들러의 filterDeletedCommentsAndMaskIP가 삭제된 댓글을 걸러내는 기준과 반드시 같아야 합니다.
+// 바깥 쿼리가 comments 테이블을 별칭 c로 참조해야만 동작합니다.
+//
+// EXISTS 서브쿼리의 상관 조건은 r.parent_id = c.id 하나만 남기고, post_id는 c.post_id 대신
+// 파라미터 $1(postID)로 고정합니다. r.post_id = c.post_id로 쓰면 플래너가 상관 서브쿼리를
+// hashed SubPlan으로 바꾸면서 comments 전체를 seq scan하지만(측정: 210k행에서 21.7ms / 4807 buffers),
+// $1로 상수화하면 idx_comments_post_id를 타서 훨씬 빨라집니다(측정: 0.457ms / 137 buffers).
+// COUNT와 SELECT 두 쿼리 모두 $1이 postID이므로 의미는 동일합니다.
 const visibleTopLevelCondition = `
 	AND (c.is_deleted = FALSE
 		OR EXISTS (
 			SELECT 1 FROM comments r
-			WHERE r.post_id = c.post_id AND r.parent_id = c.id AND r.is_deleted = FALSE
+			WHERE r.post_id = $1 AND r.parent_id = c.id AND r.is_deleted = FALSE
 		))
 `
 

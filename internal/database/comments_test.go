@@ -757,6 +757,24 @@ func TestListComments(t *testing.T) {
 				t.Errorf("index %d: expected id %d, got %d", i, expected[i], ids[i])
 			}
 		}
+
+		// When: 마지막 페이지만 조회 (limit=2, offset=2)
+		// 안 보이는 댓글(lonelyDeleted)이 페이지 슬롯을 차지하면 이 페이지가 비어버린다
+		lastPage, lastTotal, err := ListComments(ctx, tx, postID, 2, 2, SortAsc)
+
+		// Then: 보이는 댓글 기준 3번째인 alive2 하나만 반환된다
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if lastTotal != 3 {
+			t.Errorf("expected total=3, got %d", lastTotal)
+		}
+		if len(lastPage) != 1 {
+			t.Fatalf("expected 1 comment on last page, got %d", len(lastPage))
+		}
+		if lastPage[0].ID != alive2.ID {
+			t.Errorf("expected last page comment id=%d, got %d", alive2.ID, lastPage[0].ID)
+		}
 	})
 }
 
