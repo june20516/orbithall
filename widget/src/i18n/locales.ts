@@ -2,6 +2,9 @@ export const locales = {
   ko: {
     // 헤더
     'comments.title': '댓글',
+    'comments.loadMore': '댓글 {count}개 더 보기',
+    'comments.loadingMore': '불러오는 중...',
+    'comments.loadMoreError': '댓글을 더 불러오지 못했습니다. 다시 시도해주세요.',
 
     // 폼
     'form.name': '이름',
@@ -73,6 +76,9 @@ export const locales = {
   en: {
     // Header
     'comments.title': 'Comments',
+    'comments.loadMore': 'Show {count} more comments',
+    'comments.loadingMore': 'Loading...',
+    'comments.loadMoreError': 'Failed to load more comments. Please try again.',
 
     // Form
     'form.name': 'Name',
