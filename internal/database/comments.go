@@ -171,7 +171,7 @@ func UpdateComment(ctx context.Context, db DBTX, commentID int64, content, ipAdd
 
 // DeleteComment는 댓글을 soft delete 처리합니다
 // is_deleted를 TRUE로 설정하고 deleted_at에 현재 시각을 기록합니다
-// 이미 삭제된 댓글은 다시 삭제할 수 없습니다
+// 이미 삭제됐거나 없는 댓글이면 ErrCommentNotFound를 감싼 에러를 반환합니다
 func DeleteComment(ctx context.Context, db DBTX, commentID int64) error {
 	query := `
 		UPDATE comments
@@ -191,7 +191,7 @@ func DeleteComment(ctx context.Context, db DBTX, commentID int64) error {
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("comment not found or already deleted")
+		return fmt.Errorf("%w: not found or already deleted", ErrCommentNotFound)
 	}
 
 	return nil

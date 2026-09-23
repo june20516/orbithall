@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -601,4 +602,80 @@ func (h *AdminHandler) GetPostComments(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+// DeleteComment는 사이트 소유자가 댓글을 soft delete합니다
+// 이미 삭제된 댓글도 204를 반환합니다 (멱등)
+// @Summary      댓글 삭제
+// @Description  사이트 소유자가 댓글을 삭제합니다 (soft delete). 대댓글은 유지되며, 이미 삭제된 댓글도 204를 반환합니다
+// @Tags         admin
+// @Produce      plain
+// @Param        id path int true "Comment ID"
+// @Success      204 "No Content"
+// @Failure      400 {string} string "Invalid comment ID"
+// @Failure      401 {string} string "Unauthorized"
+// @Failure      403 {string} string "Forbidden"
+// @Failure      404 {string} string "Comment not found"
+// @Failure      500 {string} string "Failed to delete comment"
+// @Security     BearerAuth
+// @Router       /admin/comments/{id} [delete]
+func (h *AdminHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
+	// Context에서 사용자 추출
+	user, ok := r.Context().Value(userContextKey).(*models.User)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// URL 파라미터에서 comment_id 추출
+	commentID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || commentID <= 0 {
+		http.Error(w, "Invalid comment ID", http.StatusBadRequest)
+		return
+	}
+
+	// 댓글 조회 (삭제된 댓글 포함)
+	comment, err := database.GetCommentByID(r.Context(), h.db, commentID)
+	if err != nil {
+		http.Error(w, "Failed to get comment", http.StatusInternalServerError)
+		return
+	}
+	if comment == nil {
+		http.Error(w, "Comment not found", http.StatusNotFound)
+		return
+	}
+
+	// 댓글이 속한 사이트 확인 (댓글은 FK로 포스트에 묶여 있으므로 포스트가 없으면 서버 오류)
+	post, err := database.GetPostByID(r.Context(), h.db, comment.PostID)
+	if err != nil || post == nil {
+		http.Error(w, "Failed to get post", http.StatusInternalServerError)
+		return
+	}
+
+	// 접근 권한 확인
+	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, post.SiteID)
+	if err != nil {
+		http.Error(w, "Failed to check site access", http.StatusInternalServerError)
+		return
+	}
+	if !hasAccess {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// 이미 삭제된 댓글은 권한 확인 후에 멱등 처리
+	if comment.IsDeleted {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// 삭제 (동시 요청으로 먼저 삭제된 경우도 ErrCommentNotFound로 오므로 성공 처리)
+	err = database.DeleteComment(r.Context(), h.db, commentID)
+	if err != nil && !errors.Is(err, database.ErrCommentNotFound) {
+		http.Error(w, "Failed to delete comment", http.StatusInternalServerError)
+		return
+	}
+
+	// 204 No Content 응답
+	w.WriteHeader(http.StatusNoContent)
 }

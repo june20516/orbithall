@@ -451,9 +451,9 @@ func TestDeleteComment(t *testing.T) {
 		// When: 삭제 시도
 		err := DeleteComment(ctx, tx, nonExistentID)
 
-		// Then: 에러 반환
-		if err == nil {
-			t.Fatal("expected error for non-existent comment, got nil")
+		// Then: ErrCommentNotFound 반환
+		if !errors.Is(err, ErrCommentNotFound) {
+			t.Fatalf("expected ErrCommentNotFound, got: %v", err)
 		}
 	})
 
@@ -476,9 +476,9 @@ func TestDeleteComment(t *testing.T) {
 		// When: 이미 삭제된 댓글 삭제 시도
 		err = DeleteComment(ctx, tx, commentID)
 
-		// Then: 에러 반환
-		if err == nil {
-			t.Fatal("expected error for already deleted comment, got nil")
+		// Then: ErrCommentNotFound 반환
+		if !errors.Is(err, ErrCommentNotFound) {
+			t.Fatalf("expected ErrCommentNotFound, got: %v", err)
 		}
 	})
 }
