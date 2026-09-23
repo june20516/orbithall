@@ -131,11 +131,40 @@
   color: var(--orb-error-color);
 }
 
+/* 재조회 실패 (답글 작성·수정·삭제 후) */
+.orb-reload-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--orb-spacing-sm);
+  padding: var(--orb-spacing-sm) var(--orb-spacing-md);
+  margin-bottom: var(--orb-spacing-md);
+  background: #fee;
+  color: var(--orb-error-color);
+  border-radius: var(--orb-border-radius);
+  font-size: var(--orb-font-size-sm);
+}
+
 /* 댓글 목록 */
 .orb-comment-list {
   display: flex;
   flex-direction: column;
   gap: var(--orb-spacing-md);
+}
+
+/* 더 보기 */
+.orb-load-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--orb-spacing-xs);
+  margin-top: var(--orb-spacing-md);
+}
+
+.orb-load-more-error {
+  font-size: var(--orb-font-size-sm);
+  color: var(--orb-error-color);
+  text-align: center;
 }
 
 /* 댓글 아이템 */
@@ -260,11 +289,10 @@
 }
 
 /* 삭제된 댓글 */
-.orb-comment-deleted {
+/* 흐림과 기울임꼴은 삭제된 댓글 자리에만 적용한다.
+   자손 선택자를 쓰면 살아 있는 답글까지 삭제된 것처럼 보인다. */
+.orb-comment-deleted > .orb-comment-content {
   opacity: 0.6;
-}
-
-.orb-comment-deleted .orb-comment-content {
   font-style: italic;
   color: var(--orb-text-secondary);
 }

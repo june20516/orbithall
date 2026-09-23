@@ -101,6 +101,12 @@ SO THAT 복잡한 설정 없이 빠르게 댓글 기능을 추가할 수 있다
 - `static/embed.css`: 스타일시트
 - 전역 객체: `window.OrbitHall`
 
+### 목록 동작
+- 최상위 댓글을 최신순으로 50개씩 조회합니다(`sort=created_at&direction=desc`).
+- 남은 페이지가 있으면 목록 아래 "댓글 더 보기" 버튼으로 이어서 불러옵니다. 이미 불러온 댓글은 id로 걸러 중복되지 않습니다.
+- 대댓글은 각 댓글 아래에 오래된 순으로 모두 표시됩니다.
+- 댓글 작성 후에는 첫 페이지를 다시 불러와 작성한 댓글이 맨 위에 보입니다. 답글·수정·삭제 후에는 펼쳐 둔 범위를 유지한 채 다시 불러옵니다.
+
 ### 배포 전략
 1. **semver 태그 릴리스**
    - 태그: `v{major}.{minor}.{patch}` (예: `v1.1.1`)
@@ -125,12 +131,12 @@ SO THAT 복잡한 설정 없이 빠르게 댓글 기능을 추가할 수 있다
 <!DOCTYPE html>
 <html>
 <head>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.css">
 </head>
 <body>
   <div data-orb-container data-widget-type="comments" data-post-slug="my-post"></div>
 
-  <script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.js"></script>
   <script>
     OrbitHall.init({
       apiKey: 'YOUR_API_KEY'
@@ -149,12 +155,12 @@ export default function RootLayout({ children }) {
   return (
     <html>
       <head>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.css" />
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.css" />
       </head>
       <body>
         {children}
         <Script
-          src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js"
+          src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.js"
           onLoad={() => {
             window.OrbitHall.init({
               apiKey: process.env.NEXT_PUBLIC_ORBITHALL_API_KEY

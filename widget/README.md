@@ -13,14 +13,14 @@ HTML 페이지에 다음 코드를 추가하세요:
 <html>
 <head>
   <!-- CSS 로드 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.css">
 </head>
 <body>
   <!-- 위젯 컨테이너 -->
   <div data-orb-container data-widget-type="comments" data-post-slug="my-post-id"></div>
 
   <!-- JS 로드 및 초기화 -->
-  <script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.js"></script>
   <script>
     OrbitHall.init({
       apiKey: 'YOUR_API_KEY'
@@ -55,14 +55,14 @@ export default function RootLayout({ children }) {
       <head>
         <link
           rel="stylesheet"
-          href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.css"
+          href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.css"
         />
       </head>
       <body>
         {children}
 
         <Script
-          src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js"
+          src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.js"
           onLoad={() => {
             window.OrbitHall.init({
               apiKey: process.env.NEXT_PUBLIC_ORBITHALL_API_KEY
@@ -103,7 +103,7 @@ function App() {
   useEffect(() => {
     // 스크립트 로드
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js';
+    script.src = 'https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.js';
     script.onload = () => {
       window.OrbitHall.init({
         apiKey: process.env.REACT_APP_ORBITHALL_API_KEY
@@ -258,8 +258,17 @@ https://cdn.jsdelivr.net/gh/june20516/orbithall@{version}/static/embed.js
 https://cdn.jsdelivr.net/gh/june20516/orbithall@{version}/static/embed.css
 ```
 
-- 고정 버전(예: `@1.1.1`)을 권장합니다. jsDelivr가 1년 immutable 캐시로 제공하므로 한 번 받으면 바뀌지 않습니다.
+- 고정 버전(예: `@1.2.0`)을 권장합니다. jsDelivr가 1년 immutable 캐시로 제공하므로 한 번 받으면 바뀌지 않습니다.
 - 범위 버전(예: `@1`)은 1.x의 최신 버전을 따라갑니다. 다만 새 버전이 CDN에는 최대 12시간, 브라우저에는 최대 7일 늦게 반영됩니다.
+
+#### 1.1.1에서 1.2.0으로 올릴 때
+
+설치 주소의 버전만 바꾸면 됩니다. 설정은 그대로입니다.
+
+- 댓글이 **최신순**으로 보입니다(1.1.1은 오래된 순).
+- 최상위 댓글을 50개씩 나눠 보여 주고, 남은 댓글이 있으면 목록 아래에 **"댓글 N개 더 보기"** 버튼이 보입니다. 1.1.1은 50개까지만 보여 주고 나머지는 볼 방법이 없었습니다.
+- 대댓글은 지금처럼 각 댓글 아래에 오래된 순으로 모두 보입니다.
+- 댓글을 쓰면 목록 맨 위에 자기 댓글이 보입니다. 답글·수정·삭제 뒤에는 펼쳐 둔 범위가 그대로 유지됩니다.
 
 #### 배포 안전장치
 

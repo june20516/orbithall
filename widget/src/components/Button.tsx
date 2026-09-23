@@ -13,6 +13,8 @@ interface ButtonProps {
   htmlType?: 'button' | 'submit' | 'reset';
   disabled?: boolean;
   className?: string;
+  /** 비동기 작업이 진행 중임을 스크린 리더에 알릴 때만 지정한다 */
+  'aria-busy'?: boolean;
 }
 
 export function Button({
@@ -24,6 +26,7 @@ export function Button({
   htmlType = 'button',
   disabled = false,
   className = '',
+  'aria-busy': ariaBusy,
 }: ButtonProps): JSX.Element {
   // 기본 클래스
   const baseClass = 'orb-btn';
@@ -51,6 +54,7 @@ export function Button({
       className={finalClassName}
       onClick={onClick}
       disabled={disabled}
+      aria-busy={ariaBusy}
     >
       {label}
     </button>
