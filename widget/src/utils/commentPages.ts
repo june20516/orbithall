@@ -20,7 +20,7 @@ export function mergeCommentPages(
   return added.length === 0 ? existing : [...existing, ...added];
 }
 
-/** 더 보기 버튼에 보여 줄 남은 최상위 댓글 수입니다 */
+/** 더 보기 버튼에 보여 줄 남은 최상위 댓글 수입니다. 답글은 이 수에 포함되지 않습니다. */
 export function remainingCommentCount(
   pagination: CommentsPagination,
   loadedCount: number

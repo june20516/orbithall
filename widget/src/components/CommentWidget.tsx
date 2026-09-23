@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { CommentList } from "./CommentList";
 import { CommentForm } from "./CommentForm";
 import { Button } from "./Button";
@@ -33,7 +33,13 @@ export function CommentWidget({
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
   const { t } = useI18n();
+
+  // 조회 요청 세대 번호. 위젯은 postSlug가 바뀌어도 언마운트되지 않고
+  // prop만 갱신되므로(main.tsx의 MutationObserver 참고), 늦게 도착한 응답이
+  // 최신 화면을 덮어쓰지 않도록 모든 조회 경로가 이 번호로 자신을 식별한다.
+  const generationRef = useRef(0);
 
   // API 클라이언트 생성
   const apiClient = useMemo(
@@ -54,33 +60,53 @@ export function CommentWidget({
 
   // 첫 페이지부터 다시 불러오기 (최초 로드, 최상위 댓글 작성 후)
   const loadFirstPage = async () => {
+    const requestId = ++generationRef.current;
     try {
       setLoading(true);
       const data = await fetchPage(1);
+      if (requestId !== generationRef.current) {
+        return; // 그 사이 더 최신 조회가 시작됨 — 이 응답은 버린다
+      }
       setComments(data.comments || []);
       setPagination(data.pagination);
       setError(null);
       setLoadMoreError(null);
+      setReloadError(null);
     } catch (err) {
+      if (requestId !== generationRef.current) {
+        return;
+      }
       console.error("OrbitHall: Failed to load comments", err);
       setError(toErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (requestId === generationRef.current) {
+        setLoading(false);
+      }
     }
   };
 
   // 펼쳐 둔 범위를 유지한 채 다시 불러오기 (답글 작성, 수정, 삭제 후)
+  // 서버에는 이미 반영된 뒤이므로, 재조회가 실패해도 화면의 목록은 지우지 않고
+  // reloadError로만 알려 다시 시도할 수 있게 한다.
   const reloadOpenedPages = async () => {
     const lastPage = pagination?.currentPage ?? 1;
+    const requestId = ++generationRef.current;
     try {
       const data = await reloadPages(fetchPage, lastPage);
+      if (requestId !== generationRef.current) {
+        return;
+      }
       setComments(data.comments);
       setPagination(data.pagination);
       setError(null);
       setLoadMoreError(null);
+      setReloadError(null);
     } catch (err) {
+      if (requestId !== generationRef.current) {
+        return;
+      }
       console.error("OrbitHall: Failed to reload comments", err);
-      setError(toErrorMessage(err));
+      setReloadError(toErrorMessage(err));
     }
   };
 
@@ -90,17 +116,26 @@ export function CommentWidget({
       return;
     }
 
+    const requestId = ++generationRef.current;
     try {
       setLoadingMore(true);
       setLoadMoreError(null);
       const data = await fetchPage(pagination.currentPage + 1);
+      if (requestId !== generationRef.current) {
+        return;
+      }
       setComments((current) => mergeCommentPages(current, data.comments || []));
       setPagination(data.pagination);
     } catch (err) {
+      if (requestId !== generationRef.current) {
+        return;
+      }
       console.error("OrbitHall: Failed to load more comments", err);
       setLoadMoreError(t("comments.loadMoreError"));
     } finally {
-      setLoadingMore(false);
+      if (requestId === generationRef.current) {
+        setLoadingMore(false);
+      }
     }
   };
 
@@ -108,7 +143,16 @@ export function CommentWidget({
   useEffect(() => {
     setComments([]);
     setPagination(null);
+    setError(null);
+    setLoadMoreError(null);
+    setReloadError(null);
     loadFirstPage();
+
+    // postSlug가 다시 바뀌거나 언마운트되면 세대 번호를 올려, 이전 postSlug로
+    // 진행 중이던 요청의 응답이 새 화면에 반영되지 않도록 무효화한다.
+    return () => {
+      generationRef.current++;
+    };
   }, [postSlug]);
 
   // 댓글/답글 작성 핸들러
@@ -154,7 +198,13 @@ export function CommentWidget({
   };
 
   const showLoadMore = !loading && !error && pagination !== null && hasNextPage(pagination);
+  // 답글은 포함하지 않은, 남은 최상위 댓글 수
   const remaining = pagination ? remainingCommentCount(pagination, comments.length) : 0;
+  const loadMoreLabel = loadingMore
+    ? t("comments.loadingMore")
+    : remaining === 1
+      ? t("comments.loadMoreOne")
+      : t("comments.loadMore").replace("{count}", String(remaining));
 
   return (
     <div className="orb-widget">
@@ -167,6 +217,19 @@ export function CommentWidget({
       {loading && <div className="orb-loading">{t("loading")}</div>}
 
       {error && <div className="orb-error">{error}</div>}
+
+      {reloadError && (
+        <div className="orb-reload-error" role="status">
+          <span>{reloadError}</span>
+          <Button
+            label={t("comments.retry")}
+            onClick={reloadOpenedPages}
+            variant="clear"
+            type="secondary"
+            size="small"
+          />
+        </div>
+      )}
 
       {!loading && !error && comments.length === 0 && (
         <div className="orb-empty">{t("empty")}</div>
@@ -184,18 +247,17 @@ export function CommentWidget({
       {showLoadMore && (
         <div className="orb-load-more">
           <Button
-            label={
-              loadingMore
-                ? t("comments.loadingMore")
-                : t("comments.loadMore").replace("{count}", String(remaining))
-            }
+            label={loadMoreLabel}
             onClick={handleLoadMore}
             variant="clear"
             type="secondary"
             disabled={loadingMore}
+            aria-busy={loadingMore}
           />
           {loadMoreError && (
-            <div className="orb-load-more-error">{loadMoreError}</div>
+            <div className="orb-load-more-error" role="status">
+              {loadMoreError}
+            </div>
           )}
         </div>
       )}

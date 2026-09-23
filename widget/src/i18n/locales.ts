@@ -3,8 +3,11 @@ export const locales = {
     // 헤더
     'comments.title': '댓글',
     'comments.loadMore': '댓글 {count}개 더 보기',
+    'comments.loadMoreOne': '댓글 1개 더 보기',
     'comments.loadingMore': '불러오는 중...',
     'comments.loadMoreError': '댓글을 더 불러오지 못했습니다. 다시 시도해주세요.',
+    'comments.reloadError': '댓글 목록을 다시 불러오지 못했습니다.',
+    'comments.retry': '다시 시도',
 
     // 폼
     'form.name': '이름',
@@ -77,8 +80,11 @@ export const locales = {
     // Header
     'comments.title': 'Comments',
     'comments.loadMore': 'Show {count} more comments',
+    'comments.loadMoreOne': 'Show 1 more comment',
     'comments.loadingMore': 'Loading...',
     'comments.loadMoreError': 'Failed to load more comments. Please try again.',
+    'comments.reloadError': 'Failed to refresh comments.',
+    'comments.retry': 'Retry',
 
     // Form
     'form.name': 'Name',

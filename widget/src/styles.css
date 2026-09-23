@@ -131,6 +131,20 @@
   color: var(--orb-error-color);
 }
 
+/* 재조회 실패 (답글 작성·수정·삭제 후) */
+.orb-reload-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--orb-spacing-sm);
+  padding: var(--orb-spacing-sm) var(--orb-spacing-md);
+  margin-bottom: var(--orb-spacing-md);
+  background: #fee;
+  color: var(--orb-error-color);
+  border-radius: var(--orb-border-radius);
+  font-size: var(--orb-font-size-sm);
+}
+
 /* 댓글 목록 */
 .orb-comment-list {
   display: flex;
