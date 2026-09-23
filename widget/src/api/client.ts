@@ -1,4 +1,9 @@
-import type { Comment, CommentSubmitData, CommentsResponse } from "../types";
+import type {
+  Comment,
+  CommentSubmitData,
+  CommentsResponse,
+  SortDirection,
+} from "../types";
 import type { ErrorResponse } from "../utils/errorMessages";
 import {
   convertKeysToSnakeCase,
@@ -63,10 +68,11 @@ export class OrbitHallAPIClient {
   async getComments(
     postSlug: string,
     page = 1,
-    limit = 50
+    limit = 50,
+    direction: SortDirection = "desc"
   ): Promise<CommentsResponse> {
     return this.request<CommentsResponse>(
-      `/posts/${postSlug}/comments?page=${page}&limit=${limit}`
+      `/posts/${postSlug}/comments?page=${page}&limit=${limit}&sort=created_at&direction=${direction}`
     );
   }
 

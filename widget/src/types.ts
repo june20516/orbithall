@@ -15,9 +15,23 @@ export interface Comment {
   deletedAt?: string;
 }
 
+// 정렬 방향
+export type SortDirection = 'asc' | 'desc';
+
+// 페이지네이션 정보
+export interface CommentsPagination {
+  currentPage: number;
+  totalPages: number;
+  totalComments: number;
+  perPage: number;
+}
+
 // API 응답 타입
 export interface CommentsResponse {
   comments: Comment[];
+  sort: string;
+  direction: SortDirection;
+  pagination: CommentsPagination;
 }
 
 // 댓글 작성 데이터

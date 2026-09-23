@@ -9,6 +9,44 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// SortDirection은 최상위 댓글의 정렬 방향입니다
+type SortDirection string
+
+const (
+	// SortAsc는 오래된 댓글부터 정렬합니다
+	SortAsc SortDirection = "asc"
+	// SortDesc는 최신 댓글부터 정렬합니다
+	SortDesc SortDirection = "desc"
+)
+
+// topLevelOrderBy는 정렬 방향에 맞는 ORDER BY 절을 돌려줍니다.
+// c.created_at만으로는 같은 트랜잭션에서 만든 댓글의 순서가 흔들리므로 c.id를 함께 씁니다 (ADR-004).
+// visibleTopLevelCondition과 같은 쿼리에서 쓰이므로 별칭 c를 그대로 맞춥니다.
+func topLevelOrderBy(direction SortDirection) string {
+	if direction == SortDesc {
+		return "ORDER BY c.created_at DESC, c.id DESC"
+	}
+	return "ORDER BY c.created_at ASC, c.id ASC"
+}
+
+// visibleTopLevelCondition은 공개 목록에 보이는 최상위 댓글 조건입니다.
+// 삭제됐고 살아 있는 대댓글도 없는 댓글은 응답에서 제외되므로, 개수와 페이지 계산에서도 빼야 합니다.
+// 이 기준은 핸들러의 filterDeletedCommentsAndMaskIP가 삭제된 댓글을 걸러내는 기준과 반드시 같아야 합니다.
+// 바깥 쿼리가 comments 테이블을 별칭 c로 참조해야만 동작합니다.
+//
+// EXISTS 서브쿼리의 상관 조건은 r.parent_id = c.id 하나만 남기고, post_id는 c.post_id 대신
+// 파라미터 $1(postID)로 고정합니다. r.post_id = c.post_id로 쓰면 플래너가 상관 서브쿼리를
+// hashed SubPlan으로 바꾸면서 comments 전체를 seq scan하지만(측정: 210k행에서 21.7ms / 4807 buffers),
+// $1로 상수화하면 idx_comments_post_id를 타서 훨씬 빨라집니다(측정: 0.457ms / 137 buffers).
+// COUNT와 SELECT 두 쿼리 모두 $1이 postID이므로 의미는 동일합니다.
+const visibleTopLevelCondition = `
+	AND (c.is_deleted = FALSE
+		OR EXISTS (
+			SELECT 1 FROM comments r
+			WHERE r.post_id = $1 AND r.parent_id = c.id AND r.is_deleted = FALSE
+		))
+`
+
 // scanComment는 데이터베이스 row를 Comment 모델로 변환합니다
 // database/sql의 Scan 메서드를 활용하여 12개 필드를 매핑합니다
 func scanComment(row *sql.Row) (*models.Comment, error) {
@@ -159,27 +197,26 @@ func DeleteComment(ctx context.Context, db DBTX, commentID int64) error {
 	return nil
 }
 
-// ListComments는 포스트의 댓글 목록을 2-level 계층 구조로 조회합니다
-// 최상위 댓글(parent_id IS NULL)을 페이지네이션하고, 각 댓글의 대댓글을 함께 조회합니다
-// created_at ASC 순으로 정렬됩니다
-func ListComments(ctx context.Context, db DBTX, postID int64, limit, offset int) ([]*models.Comment, int, error) {
-	// 1단계: 최상위 댓글 총 개수 조회
+// ListComments는 포스트의 최상위 댓글을 페이지 단위로 조회하고 각 댓글의 대댓글을 붙입니다.
+// direction은 최상위 댓글에만 적용되고, 대댓글은 항상 오래된 순입니다.
+func ListComments(ctx context.Context, db DBTX, postID int64, limit, offset int, direction SortDirection) ([]*models.Comment, int, error) {
+	// 1단계: 보이는 최상위 댓글 총 개수 조회
 	var total int
 	err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
-		FROM comments
-		WHERE post_id = $1 AND parent_id IS NULL
-	`, postID).Scan(&total)
+		FROM comments c
+		WHERE c.post_id = $1 AND c.parent_id IS NULL
+	`+visibleTopLevelCondition, postID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count comments: %w", err)
 	}
 
-	// 2단계: 최상위 댓글 조회 (페이지네이션)
+	// 2단계: 보이는 최상위 댓글 조회 (페이지네이션)
 	query := `
-		SELECT id, post_id, parent_id, author_name, author_password, content, ip_address, user_agent, is_deleted, created_at, updated_at, deleted_at
-		FROM comments
-		WHERE post_id = $1 AND parent_id IS NULL
-		ORDER BY created_at ASC, id ASC
+		SELECT c.id, c.post_id, c.parent_id, c.author_name, c.author_password, c.content, c.ip_address, c.user_agent, c.is_deleted, c.created_at, c.updated_at, c.deleted_at
+		FROM comments c
+		WHERE c.post_id = $1 AND c.parent_id IS NULL
+	` + visibleTopLevelCondition + topLevelOrderBy(direction) + `
 		LIMIT $2 OFFSET $3
 	`
 

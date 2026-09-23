@@ -523,7 +523,7 @@ func TestListComments(t *testing.T) {
 		}
 
 		// When: 댓글 목록 조회 (limit=10, offset=0)
-		comments, total, err := ListComments(ctx, tx, postID, 10, 0)
+		comments, total, err := ListComments(ctx, tx, postID, 10, 0, SortAsc)
 
 		// Then: 2개의 최상위 댓글과 각각의 대댓글이 조회됨
 		if err != nil {
@@ -570,7 +570,7 @@ func TestListComments(t *testing.T) {
 		}
 
 		// When: limit=2, offset=0 (첫 페이지)
-		page1, total1, err := ListComments(ctx, tx, postID, 2, 0)
+		page1, total1, err := ListComments(ctx, tx, postID, 2, 0, SortAsc)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -582,7 +582,7 @@ func TestListComments(t *testing.T) {
 		}
 
 		// When: limit=2, offset=2 (두 번째 페이지)
-		page2, total2, err := ListComments(ctx, tx, postID, 2, 2)
+		page2, total2, err := ListComments(ctx, tx, postID, 2, 2, SortAsc)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -594,7 +594,7 @@ func TestListComments(t *testing.T) {
 		}
 
 		// When: limit=2, offset=4 (마지막 페이지)
-		page3, total3, err := ListComments(ctx, tx, postID, 2, 4)
+		page3, total3, err := ListComments(ctx, tx, postID, 2, 4, SortAsc)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -612,7 +612,7 @@ func TestListComments(t *testing.T) {
 		postID := testhelpers.CreateTestPost(ctx, t, tx, siteID, "test-post-empty", "Test Post").ID
 
 		// When: 댓글 목록 조회
-		comments, total, err := ListComments(ctx, tx, postID, 10, 0)
+		comments, total, err := ListComments(ctx, tx, postID, 10, 0, SortAsc)
 
 		// Then: 빈 목록 반환
 		if err != nil {
@@ -644,7 +644,7 @@ func TestListComments(t *testing.T) {
 		}
 
 		// When: 댓글 목록 조회
-		comments, _, err := ListComments(ctx, tx, postID, 10, 0)
+		comments, _, err := ListComments(ctx, tx, postID, 10, 0, SortAsc)
 
 		// Then: 다른 포스트의 답글은 포함되지 않음
 		if err != nil {
@@ -655,6 +655,125 @@ func TestListComments(t *testing.T) {
 		}
 		if len(comments[0].Replies) != 0 {
 			t.Errorf("expected 0 replies, got %d", len(comments[0].Replies))
+		}
+	})
+
+	t.Run("최신순 정렬은 최상위 댓글을 뒤집고 대댓글은 오래된 순을 유지", func(t *testing.T) {
+		// Given: 최상위 댓글 2개와 첫 댓글의 대댓글 2개
+		postID := testhelpers.CreateTestPost(ctx, t, tx, siteID, "test-post-desc", "Test Post").ID
+
+		first, err := CreateComment(ctx, tx, postID, nil, "Author1", "pass", "First", "10.0.0.1", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create first: %v", err)
+		}
+		second, err := CreateComment(ctx, tx, postID, nil, "Author2", "pass", "Second", "10.0.0.2", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create second: %v", err)
+		}
+		reply1, err := CreateComment(ctx, tx, postID, &first.ID, "Reply1", "pass", "Reply 1", "10.0.0.3", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create reply1: %v", err)
+		}
+		reply2, err := CreateComment(ctx, tx, postID, &first.ID, "Reply2", "pass", "Reply 2", "10.0.0.4", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create reply2: %v", err)
+		}
+
+		// When: 최신순으로 조회
+		comments, total, err := ListComments(ctx, tx, postID, 10, 0, SortDesc)
+
+		// Then: 최상위는 나중에 만든 댓글이 먼저, 대댓글은 만든 순서 그대로
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if total != 2 {
+			t.Errorf("expected total=2, got %d", total)
+		}
+		if len(comments) != 2 {
+			t.Fatalf("expected 2 top-level comments, got %d", len(comments))
+		}
+		if comments[0].ID != second.ID {
+			t.Errorf("expected newest comment first, got id %d", comments[0].ID)
+		}
+		if comments[1].ID != first.ID {
+			t.Errorf("expected oldest comment last, got id %d", comments[1].ID)
+		}
+		if len(comments[1].Replies) != 2 {
+			t.Fatalf("expected 2 replies, got %d", len(comments[1].Replies))
+		}
+		if comments[1].Replies[0].ID != reply1.ID || comments[1].Replies[1].ID != reply2.ID {
+			t.Errorf("expected replies in oldest-first order, got %d, %d",
+				comments[1].Replies[0].ID, comments[1].Replies[1].ID)
+		}
+	})
+
+	t.Run("보이지 않는 삭제 댓글은 개수와 페이지에서 제외", func(t *testing.T) {
+		// Given: 살아 있는 댓글 2개, 답글 없이 삭제된 댓글 1개, 살아 있는 답글이 있는 삭제된 댓글 1개
+		postID := testhelpers.CreateTestPost(ctx, t, tx, siteID, "test-post-visible", "Test Post").ID
+
+		alive1, err := CreateComment(ctx, tx, postID, nil, "Alive1", "pass", "Alive 1", "10.0.0.1", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create alive1: %v", err)
+		}
+		lonelyDeleted, err := CreateComment(ctx, tx, postID, nil, "Lonely", "pass", "Lonely", "10.0.0.2", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create lonelyDeleted: %v", err)
+		}
+		if err := DeleteComment(ctx, tx, lonelyDeleted.ID); err != nil {
+			t.Fatalf("failed to delete lonelyDeleted: %v", err)
+		}
+		deletedWithReply, err := CreateComment(ctx, tx, postID, nil, "Parent", "pass", "Parent", "10.0.0.3", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create deletedWithReply: %v", err)
+		}
+		if _, err := CreateComment(ctx, tx, postID, &deletedWithReply.ID, "Reply", "pass", "Reply", "10.0.0.4", "Agent"); err != nil {
+			t.Fatalf("failed to create reply: %v", err)
+		}
+		if err := DeleteComment(ctx, tx, deletedWithReply.ID); err != nil {
+			t.Fatalf("failed to delete deletedWithReply: %v", err)
+		}
+		alive2, err := CreateComment(ctx, tx, postID, nil, "Alive2", "pass", "Alive 2", "10.0.0.5", "Agent")
+		if err != nil {
+			t.Fatalf("failed to create alive2: %v", err)
+		}
+
+		// When: 오래된 순으로 조회
+		comments, total, err := ListComments(ctx, tx, postID, 10, 0, SortAsc)
+
+		// Then: 답글 없이 삭제된 댓글만 빠진다
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if total != 3 {
+			t.Errorf("expected total=3 (lonely deleted excluded), got %d", total)
+		}
+		if len(comments) != 3 {
+			t.Fatalf("expected 3 comments, got %d", len(comments))
+		}
+		ids := []int64{comments[0].ID, comments[1].ID, comments[2].ID}
+		expected := []int64{alive1.ID, deletedWithReply.ID, alive2.ID}
+		for i := range expected {
+			if ids[i] != expected[i] {
+				t.Errorf("index %d: expected id %d, got %d", i, expected[i], ids[i])
+			}
+		}
+
+		// When: 마지막 페이지만 조회 (limit=2, offset=2)
+		// 안 보이는 댓글(lonelyDeleted)이 페이지 슬롯을 차지하면 이 페이지가 비어버린다
+		lastPage, lastTotal, err := ListComments(ctx, tx, postID, 2, 2, SortAsc)
+
+		// Then: 보이는 댓글 기준 3번째인 alive2 하나만 반환된다
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if lastTotal != 3 {
+			t.Errorf("expected total=3, got %d", lastTotal)
+		}
+		if len(lastPage) != 1 {
+			t.Fatalf("expected 1 comment on last page, got %d", len(lastPage))
+		}
+		if lastPage[0].ID != alive2.ID {
+			t.Errorf("expected last page comment id=%d, got %d", alive2.ID, lastPage[0].ID)
 		}
 	})
 }

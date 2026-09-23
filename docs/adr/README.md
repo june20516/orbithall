@@ -98,6 +98,7 @@ Proposed | Accepted | Deprecated | Superseded
 | [005](005-timestamp-function-strategy.md) | Timestamp 함수 전략 | Accepted | 2025-10-22 |
 | [006](006-widget-versioning-deployment-strategy.md) | Widget 버전 관리 및 배포 전략 | Superseded by 007 | 2025-10-24 |
 | [007](007-widget-semver-tag-release.md) | Widget semver 태그 릴리스 | Accepted | 2026-09-22 |
+| [008](008-comment-list-sort-parameters.md) | 공개 댓글 목록 정렬 파라미터 | Accepted | 2026-09-23 |
 
 ## 참고 자료
 
