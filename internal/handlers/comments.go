@@ -297,7 +297,7 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 
 	// 6. 댓글 목록 조회 (2-level 트리 구조)
-	comments, totalCount, err := database.ListComments(ctx, h.db, post.ID, limit, offset)
+	comments, totalCount, err := database.ListComments(ctx, h.db, post.ID, limit, offset, database.SortAsc)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to list comments", nil)
 		return
