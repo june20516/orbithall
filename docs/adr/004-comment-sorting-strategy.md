@@ -3,6 +3,8 @@
 ## Status
 Accepted
 
+> 정렬 방향 선택은 [ADR-008](008-comment-list-sort-parameters.md)에서 확장되었다. `created_at`과 `id`를 함께 쓰는 원칙은 그대로다.
+
 ## Context
 댓글 목록 조회 시 정렬 순서를 보장하는 방법에는 여러 선택지가 있습니다:
 

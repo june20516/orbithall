@@ -117,19 +117,34 @@ GET /api/posts/:slug/comments
 Headers: X-Orbithall-API-Key
 ```
 
-응답 예시:
+**쿼리 파라미터**
+
+| 이름 | 값 | 기본값 | 설명 |
+|------|-----|--------|------|
+| `page` | 1 이상 | 1 | 페이지 번호 |
+| `limit` | 1~100 | 50 | 페이지당 최상위 댓글 수 |
+| `sort` | `created_at` | `created_at` | 정렬 기준 |
+| `direction` | `desc`, `asc` | `desc` | `desc`는 최신순, `asc`는 오래된 순 |
+
+`sort`나 `direction`에 허용하지 않는 값을 주면 400 `INVALID_INPUT`을 반환합니다. 대댓글은 방향과 무관하게 항상 오래된 순입니다.
+
+**응답**
 
 ```json
 {
   "comments": [...],
+  "sort": "created_at",
+  "direction": "desc",
   "pagination": {
     "current_page": 1,
-    "total_pages": 1,
-    "total_comments": 10,
+    "total_pages": 2,
+    "total_comments": 58,
     "per_page": 50
   }
 }
 ```
+
+`total_comments`는 화면에 보이는 최상위 댓글 수입니다(답글 없이 삭제된 댓글 제외).
 
 ### Admin API (JWT 인증 필요)
 
@@ -218,7 +233,7 @@ API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
 ```html
 <link
   rel="stylesheet"
-  href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.css"
+  href="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.css"
 />
 
 <div
@@ -227,7 +242,7 @@ API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
   data-post-slug="your-post-id"
 ></div>
 
-<script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.1.1/static/embed.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/june20516/orbithall@1.2.0/static/embed.js"></script>
 <script>
   OrbitHall.init({ apiKey: "YOUR_API_KEY" });
 </script>

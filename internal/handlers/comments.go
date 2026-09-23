@@ -270,7 +270,7 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 // @Param sort query string false "정렬 기준 (created_at)" default(created_at)
 // @Param direction query string false "정렬 방향 (desc: 최신순, asc: 오래된 순)" Enums(asc, desc) default(desc)
 // @Success 200 {object} object{comments=[]models.Comment,pagination=object{current_page=int,total_pages=int,total_comments=int,per_page=int}} "댓글 목록 조회 성공"
-// @Failure 400 {object} object{error=object{code=string,message=string}} "INVALID_INPUT - slug 누락" example({"error":{"code":"INVALID_INPUT","message":"Post slug is required"}})
+// @Failure 400 {object} object{error=object{code=string,message=string}} "INVALID_INPUT - slug 누락, 허용하지 않는 sort/direction 값" example({"error":{"code":"INVALID_INPUT","message":"Post slug is required"}})
 // @Failure 401 {object} object{error=object{code=string,message=string}} "MISSING_API_KEY - API 키 헤더 누락" example({"error":{"code":"MISSING_API_KEY","message":"API key is required"}})
 // @Failure 403 {object} object{error=object{code=string,message=string}} "INVALID_API_KEY | SITE_INACTIVE | INVALID_ORIGIN" example({"error":{"code":"INVALID_API_KEY","message":"Invalid API key"}})
 // @Failure 500 {object} object{error=object{code=string,message=string}} "INTERNAL_SERVER_ERROR - 서버 내부 오류" example({"error":{"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"}})
