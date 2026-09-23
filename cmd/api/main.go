@@ -200,6 +200,7 @@ func run() error {
 		r.Get("/sites/{id}/stats", adminHandler.GetSiteStats)
 		r.Get("/sites/{id}/posts", adminHandler.ListSitePosts)
 		r.Get("/posts/{slug}/comments", adminHandler.GetPostComments)
+		r.Delete("/comments/{id}", adminHandler.DeleteComment)
 	})
 
 	// ============================================
