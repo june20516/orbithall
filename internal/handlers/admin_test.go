@@ -1100,6 +1100,28 @@ func setupAdminDeleteFixture(ctx context.Context, t *testing.T, tx database.DBTX
 	return adminDeleteFixture{owner: owner, site: site, post: post}
 }
 
+// createStrangerWithSite는 자기 사이트를 가진 다른 사용자를 만듭니다 (사이트 간 격리 검증용)
+func createStrangerWithSite(ctx context.Context, t *testing.T, tx database.DBTX) *models.User {
+	t.Helper()
+
+	stranger := &models.User{Email: "stranger@example.com", Name: "Stranger", GoogleID: "google-stranger"}
+	if err := database.CreateUser(ctx, tx, stranger); err != nil {
+		t.Fatalf("Failed to create stranger: %v", err)
+	}
+
+	strangerSite := &models.Site{
+		Name:        "Stranger Blog",
+		Domain:      "stranger.com",
+		CORSOrigins: []string{"https://stranger.com"},
+		IsActive:    true,
+	}
+	if err := database.CreateSiteForUser(ctx, tx, strangerSite, stranger.ID); err != nil {
+		t.Fatalf("Failed to create stranger site: %v", err)
+	}
+
+	return stranger
+}
+
 // requestAdminDeleteComment는 user를 context에 넣고 DELETE /admin/comments/{id}를 호출합니다
 // user가 nil이면 context에 사용자를 넣지 않습니다
 func requestAdminDeleteComment(ctx context.Context, tx database.DBTX, user *models.User, commentID string) *httptest.ResponseRecorder {
@@ -1194,16 +1216,13 @@ func TestAdminDeleteComment(t *testing.T) {
 		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
 		defer cleanup()
 
-		// Given: 소유자 사이트의 댓글과 사이트가 없는 다른 사용자
+		// Given: 소유자 사이트의 댓글과, 자기 사이트를 가진 다른 사용자
 		f := setupAdminDeleteFixture(ctx, t, tx)
 		comment, err := database.CreateComment(ctx, tx, f.post.ID, nil, "author", "pass", "content", "1.1.1.1", "ua")
 		if err != nil {
 			t.Fatalf("Failed to create comment: %v", err)
 		}
-		stranger := &models.User{Email: "stranger@example.com", Name: "Stranger", GoogleID: "google-stranger"}
-		if err := database.CreateUser(ctx, tx, stranger); err != nil {
-			t.Fatalf("Failed to create stranger: %v", err)
-		}
+		stranger := createStrangerWithSite(ctx, t, tx)
 
 		// When: 다른 사용자가 삭제
 		rec := requestAdminDeleteComment(ctx, tx, stranger, strconv.FormatInt(comment.ID, 10))
@@ -1225,7 +1244,7 @@ func TestAdminDeleteComment(t *testing.T) {
 		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
 		defer cleanup()
 
-		// Given: 소유자 사이트의 삭제된 댓글과 다른 사용자
+		// Given: 소유자 사이트의 삭제된 댓글과, 자기 사이트를 가진 다른 사용자
 		f := setupAdminDeleteFixture(ctx, t, tx)
 		comment, err := database.CreateComment(ctx, tx, f.post.ID, nil, "author", "pass", "content", "1.1.1.1", "ua")
 		if err != nil {
@@ -1234,10 +1253,7 @@ func TestAdminDeleteComment(t *testing.T) {
 		if err := database.DeleteComment(ctx, tx, comment.ID); err != nil {
 			t.Fatalf("Failed to delete comment: %v", err)
 		}
-		stranger := &models.User{Email: "stranger@example.com", Name: "Stranger", GoogleID: "google-stranger"}
-		if err := database.CreateUser(ctx, tx, stranger); err != nil {
-			t.Fatalf("Failed to create stranger: %v", err)
-		}
+		stranger := createStrangerWithSite(ctx, t, tx)
 
 		// When: 다른 사용자가 삭제
 		rec := requestAdminDeleteComment(ctx, tx, stranger, strconv.FormatInt(comment.ID, 10))
