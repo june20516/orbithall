@@ -26,7 +26,7 @@
 | `internal/handlers/admin.go` | 수정 (끝에 핸들러 추가, import `errors`) | 어드민 댓글 삭제 |
 | `internal/handlers/admin_test.go` | 수정 (끝에 테스트 추가) | 핸들러 테스트 |
 | `cmd/api/main.go` | 수정 (`/admin` 그룹) | 라우트 등록 |
-| `docs/docs.go`, `docs/swagger.json`, `docs/swagger.yaml` | 재생성 | API 문서 |
+| `docs/docs.go`, `docs/swagger.json`, `docs/swagger.yaml` | 로컬 생성만 (커밋 안 함, `.gitignore` 대상) | API 문서 확인 |
 | `docs/tasks/active/018-...` → `docs/tasks/completed/018-...` | 이동·수정 | 결과 기록 |
 
 ---
@@ -529,7 +529,7 @@ git commit -m "feat: 어드민 댓글 삭제 핸들러 추가"
 
 **Files:**
 - Modify: `cmd/api/main.go` (`/admin` 라우트 그룹, 약 200~202행)
-- Regenerate: `docs/docs.go`, `docs/swagger.json`, `docs/swagger.yaml`
+- Generate (로컬 확인만, 커밋 안 함): `docs/docs.go`, `docs/swagger.json`, `docs/swagger.yaml` — `.gitignore` 대상이며 Dockerfile이 빌드 때 `swag init`으로 생성
 
 - [ ] **Step 1: 라우트 추가**
 
@@ -549,9 +549,6 @@ git commit -m "feat: 어드민 댓글 삭제 핸들러 추가"
 실행: `~/go/bin/swag init -g cmd/api/main.go --output ./docs`
 기대: `create docs.go at docs/docs.go` 등 3개 파일 생성 로그
 
-실행: `git diff --stat docs/docs.go docs/swagger.json docs/swagger.yaml`
-기대: 3개 파일에 `/admin/comments/{id}` delete 경로만 추가됨. 다른 경로가 크게 바뀌었다면 swag 버전 차이이므로 되돌리고(`git checkout docs/docs.go docs/swagger.json docs/swagger.yaml`) 사용자에게 알린다.
-
 실행: `grep -n '"/admin/comments/{id}"' docs/swagger.json`
 기대: 1줄 이상
 
@@ -565,8 +562,8 @@ API 컨테이너는 air로 재시작된다(`.air.toml`). JWT 없이 호출해 �
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cmd/api/main.go docs/docs.go docs/swagger.json docs/swagger.yaml
-git commit -m "feat: 어드민 댓글 삭제 라우트와 API 문서 추가"
+git add cmd/api/main.go
+git commit -m "feat: 어드민 댓글 삭제 라우트 등록"
 ```
 
 ---

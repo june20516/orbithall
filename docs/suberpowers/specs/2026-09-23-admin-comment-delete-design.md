@@ -82,7 +82,7 @@ if rowsAffected == 0 {
 ### 그 밖의 변경
 
 - `cmd/api/main.go`: `/admin` 그룹에 `r.Delete("/comments/{id}", adminHandler.DeleteComment)`
-- swagger 주석 추가 후 `docs/swagger.json`, `docs/swagger.yaml`, `docs/docs.go` 재생성
+- swagger 주석 추가. 산출물(`docs/docs.go`, `docs/swagger.json`, `docs/swagger.yaml`)은 `.gitignore` 대상이고 Dockerfile이 빌드 때 `swag init`으로 만들므로 커밋하지 않고, 로컬에서 생성해 새 경로가 들어가는지만 확인
 - 작업 문서: 시작 시 `docs/tasks/active/018-admin-comment-delete-api.md`로 옮기고, 완료 후 결과를 기록해 `completed/`로 이동
 
 ## 범위 밖
