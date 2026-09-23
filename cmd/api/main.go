@@ -200,6 +200,9 @@ func run() error {
 		r.Get("/sites/{id}/stats", adminHandler.GetSiteStats)
 		r.Get("/sites/{id}/posts", adminHandler.ListSitePosts)
 		r.Get("/posts/{slug}/comments", adminHandler.GetPostComments)
+
+		// 댓글 관리 (018)
+		r.Delete("/comments/{id}", adminHandler.DeleteComment)
 	})
 
 	// ============================================

@@ -1069,3 +1069,297 @@ func TestGetPostComments(t *testing.T) {
 		}
 	})
 }
+
+// adminDeleteFixture는 어드민 댓글 삭제 테스트용 사용자·사이트·포스트입니다
+type adminDeleteFixture struct {
+	owner *models.User
+	site  *models.Site
+	post  models.Post
+}
+
+// setupAdminDeleteFixture는 소유자와 소유자의 사이트, 포스트를 만듭니다
+func setupAdminDeleteFixture(ctx context.Context, t *testing.T, tx database.DBTX) adminDeleteFixture {
+	t.Helper()
+
+	owner := &models.User{Email: "owner@example.com", Name: "Owner", GoogleID: "google-owner"}
+	if err := database.CreateUser(ctx, tx, owner); err != nil {
+		t.Fatalf("Failed to create owner: %v", err)
+	}
+
+	site := &models.Site{
+		Name:        "Owner Blog",
+		Domain:      "owner.com",
+		CORSOrigins: []string{"https://owner.com"},
+		IsActive:    true,
+	}
+	if err := database.CreateSiteForUser(ctx, tx, site, owner.ID); err != nil {
+		t.Fatalf("Failed to create site: %v", err)
+	}
+
+	post := testhelpers.CreateTestPost(ctx, t, tx, site.ID, "post-1", "Post 1")
+	return adminDeleteFixture{owner: owner, site: site, post: post}
+}
+
+// createStrangerWithSite는 자기 사이트를 가진 다른 사용자를 만듭니다 (사이트 간 격리 검증용)
+func createStrangerWithSite(ctx context.Context, t *testing.T, tx database.DBTX) *models.User {
+	t.Helper()
+
+	stranger := &models.User{Email: "stranger@example.com", Name: "Stranger", GoogleID: "google-stranger"}
+	if err := database.CreateUser(ctx, tx, stranger); err != nil {
+		t.Fatalf("Failed to create stranger: %v", err)
+	}
+
+	strangerSite := &models.Site{
+		Name:        "Stranger Blog",
+		Domain:      "stranger.com",
+		CORSOrigins: []string{"https://stranger.com"},
+		IsActive:    true,
+	}
+	if err := database.CreateSiteForUser(ctx, tx, strangerSite, stranger.ID); err != nil {
+		t.Fatalf("Failed to create stranger site: %v", err)
+	}
+
+	return stranger
+}
+
+// requestAdminDeleteComment는 user를 context에 넣고 DELETE /admin/comments/{id}를 호출합니다
+// user가 nil이면 context에 사용자를 넣지 않습니다
+func requestAdminDeleteComment(ctx context.Context, tx database.DBTX, user *models.User, commentID string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodDelete, "/admin/comments/"+commentID, nil)
+	if user != nil {
+		ctx = context.WithValue(ctx, userContextKey, user)
+	}
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", commentID)
+	req = req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	NewAdminHandler(tx).DeleteComment(rec, req)
+	return rec
+}
+
+// TestAdminDeleteComment는 어드민 댓글 삭제 기능을 테스트합니다
+func TestAdminDeleteComment(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	t.Run("삭제 성공 - 204, soft delete 기록", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 소유자 사이트의 댓글
+		f := setupAdminDeleteFixture(ctx, t, tx)
+		comment, err := database.CreateComment(ctx, tx, f.post.ID, nil, "spammer", "pass", "spam", "1.1.1.1", "ua")
+		if err != nil {
+			t.Fatalf("Failed to create comment: %v", err)
+		}
+
+		// When: 소유자가 삭제
+		rec := requestAdminDeleteComment(ctx, tx, f.owner, strconv.FormatInt(comment.ID, 10))
+
+		// Then: 204, is_deleted와 deleted_at 기록
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusNoContent, rec.Code, rec.Body.String())
+		}
+		deleted, err := database.GetCommentByID(ctx, tx, comment.ID)
+		if err != nil {
+			t.Fatalf("Failed to get comment: %v", err)
+		}
+		if !deleted.IsDeleted {
+			t.Error("Expected is_deleted=true, got false")
+		}
+		if deleted.DeletedAt == nil {
+			t.Error("Expected deleted_at to be set, got nil")
+		}
+	})
+
+	t.Run("이미 삭제된 댓글 - 204 멱등", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 이미 삭제된 댓글
+		f := setupAdminDeleteFixture(ctx, t, tx)
+		comment, err := database.CreateComment(ctx, tx, f.post.ID, nil, "author", "pass", "content", "1.1.1.1", "ua")
+		if err != nil {
+			t.Fatalf("Failed to create comment: %v", err)
+		}
+		if err := database.DeleteComment(ctx, tx, comment.ID); err != nil {
+			t.Fatalf("Failed to delete comment: %v", err)
+		}
+
+		// When: 다시 삭제
+		rec := requestAdminDeleteComment(ctx, tx, f.owner, strconv.FormatInt(comment.ID, 10))
+
+		// Then: 204
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusNoContent, rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("없는 댓글 - 404", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 소유자만 존재
+		f := setupAdminDeleteFixture(ctx, t, tx)
+
+		// When: 없는 ID 삭제
+		rec := requestAdminDeleteComment(ctx, tx, f.owner, "999999999")
+
+		// Then: 404
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusNotFound, rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("다른 사용자 사이트의 댓글 - 403, 삭제되지 않음", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 소유자 사이트의 댓글과, 자기 사이트를 가진 다른 사용자
+		f := setupAdminDeleteFixture(ctx, t, tx)
+		comment, err := database.CreateComment(ctx, tx, f.post.ID, nil, "author", "pass", "content", "1.1.1.1", "ua")
+		if err != nil {
+			t.Fatalf("Failed to create comment: %v", err)
+		}
+		stranger := createStrangerWithSite(ctx, t, tx)
+
+		// When: 다른 사용자가 삭제
+		rec := requestAdminDeleteComment(ctx, tx, stranger, strconv.FormatInt(comment.ID, 10))
+
+		// Then: 403, 댓글은 그대로
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusForbidden, rec.Code, rec.Body.String())
+		}
+		unchanged, err := database.GetCommentByID(ctx, tx, comment.ID)
+		if err != nil {
+			t.Fatalf("Failed to get comment: %v", err)
+		}
+		if unchanged.IsDeleted {
+			t.Error("Expected comment to remain, but it was deleted")
+		}
+	})
+
+	t.Run("다른 사용자 사이트의 삭제된 댓글 - 403", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 소유자 사이트의 삭제된 댓글과, 자기 사이트를 가진 다른 사용자
+		f := setupAdminDeleteFixture(ctx, t, tx)
+		comment, err := database.CreateComment(ctx, tx, f.post.ID, nil, "author", "pass", "content", "1.1.1.1", "ua")
+		if err != nil {
+			t.Fatalf("Failed to create comment: %v", err)
+		}
+		if err := database.DeleteComment(ctx, tx, comment.ID); err != nil {
+			t.Fatalf("Failed to delete comment: %v", err)
+		}
+		stranger := createStrangerWithSite(ctx, t, tx)
+
+		// When: 다른 사용자가 삭제
+		rec := requestAdminDeleteComment(ctx, tx, stranger, strconv.FormatInt(comment.ID, 10))
+
+		// Then: 삭제 여부를 드러내지 않고 403
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusForbidden, rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("잘못된 ID - 400", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 소유자
+		f := setupAdminDeleteFixture(ctx, t, tx)
+
+		for _, invalidID := range []string{"abc", "0", "-1"} {
+			// When: 잘못된 ID로 삭제
+			rec := requestAdminDeleteComment(ctx, tx, f.owner, invalidID)
+
+			// Then: 400
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("id=%q: Expected status %d, got %d", invalidID, http.StatusBadRequest, rec.Code)
+			}
+		}
+	})
+
+	t.Run("사용자 context 없음 - 401", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 소유자 사이트의 댓글
+		f := setupAdminDeleteFixture(ctx, t, tx)
+		comment, err := database.CreateComment(ctx, tx, f.post.ID, nil, "author", "pass", "content", "1.1.1.1", "ua")
+		if err != nil {
+			t.Fatalf("Failed to create comment: %v", err)
+		}
+
+		// When: 사용자 없이 삭제
+		rec := requestAdminDeleteComment(ctx, tx, nil, strconv.FormatInt(comment.ID, 10))
+
+		// Then: 401
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+	})
+
+	t.Run("대댓글이 달린 부모 삭제 - 대댓글 유지", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 부모 댓글과 대댓글
+		f := setupAdminDeleteFixture(ctx, t, tx)
+		parent, err := database.CreateComment(ctx, tx, f.post.ID, nil, "parent", "pass", "parent", "1.1.1.1", "ua")
+		if err != nil {
+			t.Fatalf("Failed to create parent: %v", err)
+		}
+		reply, err := database.CreateComment(ctx, tx, f.post.ID, &parent.ID, "reply", "pass", "reply", "2.2.2.2", "ua")
+		if err != nil {
+			t.Fatalf("Failed to create reply: %v", err)
+		}
+
+		// When: 부모 삭제
+		rec := requestAdminDeleteComment(ctx, tx, f.owner, strconv.FormatInt(parent.ID, 10))
+
+		// Then: 204, 대댓글은 삭제되지 않음
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusNoContent, rec.Code, rec.Body.String())
+		}
+		remaining, err := database.GetCommentByID(ctx, tx, reply.ID)
+		if err != nil {
+			t.Fatalf("Failed to get reply: %v", err)
+		}
+		if remaining.IsDeleted {
+			t.Error("Expected reply to remain, but it was deleted")
+		}
+	})
+
+	t.Run("삭제 후 사이트 통계에 반영", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 활성 댓글 2개
+		f := setupAdminDeleteFixture(ctx, t, tx)
+		target, err := database.CreateComment(ctx, tx, f.post.ID, nil, "a", "pass", "a", "1.1.1.1", "ua")
+		if err != nil {
+			t.Fatalf("Failed to create comment: %v", err)
+		}
+		if _, err := database.CreateComment(ctx, tx, f.post.ID, nil, "b", "pass", "b", "2.2.2.2", "ua"); err != nil {
+			t.Fatalf("Failed to create comment: %v", err)
+		}
+
+		// When: 한 개 삭제
+		rec := requestAdminDeleteComment(ctx, tx, f.owner, strconv.FormatInt(target.ID, 10))
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusNoContent, rec.Code, rec.Body.String())
+		}
+
+		// Then: 활성 1, 삭제 1
+		stats, err := database.GetSiteStats(ctx, tx, f.site.ID)
+		if err != nil {
+			t.Fatalf("Failed to get stats: %v", err)
+		}
+		if stats.CommentCount != 1 || stats.DeletedCommentCount != 1 {
+			t.Errorf("Expected comment_count=1, deleted_comment_count=1, got %d, %d", stats.CommentCount, stats.DeletedCommentCount)
+		}
+	})
+}
