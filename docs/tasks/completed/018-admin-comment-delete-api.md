@@ -41,7 +41,7 @@
   - 400 잘못된 ID, 401 사용자 없음, 404 없는 댓글, 403 권한 없음, 204 삭제 성공·이미 삭제됨
   - 이미 삭제됐는지는 권한 확인 뒤에 판단 (권한 없는 사용자에게 삭제 여부를 드러내지 않음)
 - `database.DeleteComment`의 0건 에러를 `ErrCommentNotFound`로 감싸 동시 삭제 경합도 204로 처리
-- 대댓글 유지, 사이트 통계·게시글 목록 삭제 수 반영은 테스트로 확인 (코드 변경 없음)
+- 대댓글 유지와 사이트 통계 반영은 `TestAdminDeleteComment`로, 게시글 목록 삭제 수 반영은 기존 `posts_test.go`의 `ListPostsBySite` 테스트로 확인 (코드 변경 없음)
 - swagger 산출물은 `.gitignore` 대상이라 커밋하지 않음 (Dockerfile이 빌드 때 생성)
 - 설계: `docs/suberpowers/specs/2026-09-23-admin-comment-delete-design.md`
 - 계획: `docs/suberpowers/plans/2026-09-23-admin-comment-delete.md`

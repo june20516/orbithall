@@ -6,7 +6,7 @@
 ## 배경 (2026-09-23 코드 확인)
 
 - 댓글 삭제는 공개 API `DELETE /api/comments/{id}`뿐이고, 작성자 비밀번호와 작성 후 30분 이내 조건이 필요하다. 사이트 소유자가 스팸·부적절한 댓글을 정리할 방법이 없다.
-- 작업 문서: `docs/tasks/pending/p1-018-admin-comment-delete-api.md`. 어드민 대응 과제는 orbithall-admin `docs/pending/admin-comment-delete.md`.
+- 작업 문서: `docs/tasks/completed/018-admin-comment-delete-api.md` (작성 당시 `pending/p1-018-...`). 어드민 대응 과제는 orbithall-admin `docs/pending/admin-comment-delete.md`.
 
 ### 코드에서 확인한 사실
 
