@@ -117,13 +117,18 @@ const commentSortCreatedAt = "created_at"
 
 // parseCommentSort는 sort/direction 쿼리 파라미터를 검증해 돌려줍니다.
 // 값이 없으면 기본값(created_at, desc)을 쓰고, 허용하지 않는 값이면 어떤 파라미터가 문제인지 알려줍니다.
-func parseCommentSort(r *http.Request) (string, database.SortDirection, map[string]string) {
+//
+// page/limit과 달리 잘못된 값을 가장 가까운 기본값으로 조용히 보정하지 않고 거절합니다.
+// 정렬을 조용히 기본값으로 보정하면 응답 순서가 통째로 뒤집혀도 클라이언트가 알아채기 어렵기 때문입니다.
+func parseCommentSort(r *http.Request) (string, database.SortDirection, validators.ValidationErrors) {
+	errs := make(validators.ValidationErrors)
+
 	sortField := r.URL.Query().Get("sort")
 	if sortField == "" {
 		sortField = commentSortCreatedAt
 	}
 	if sortField != commentSortCreatedAt {
-		return "", "", map[string]string{"sort": "supported values: created_at"}
+		errs["sort"] = "Supported values: created_at"
 	}
 
 	direction := database.SortDirection(r.URL.Query().Get("direction"))
@@ -131,7 +136,11 @@ func parseCommentSort(r *http.Request) (string, database.SortDirection, map[stri
 		direction = database.SortDesc
 	}
 	if direction != database.SortAsc && direction != database.SortDesc {
-		return "", "", map[string]string{"direction": "supported values: asc, desc"}
+		errs["direction"] = "Supported values: asc, desc"
+	}
+
+	if len(errs) > 0 {
+		return "", "", errs
 	}
 
 	return sortField, direction, nil
@@ -269,8 +278,8 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 // @Param limit query int false "페이지당 댓글 수 (기본값: 50, 최대: 100)"
 // @Param sort query string false "정렬 기준 (created_at)" default(created_at)
 // @Param direction query string false "정렬 방향 (desc: 최신순, asc: 오래된 순)" Enums(asc, desc) default(desc)
-// @Success 200 {object} object{comments=[]models.Comment,pagination=object{current_page=int,total_pages=int,total_comments=int,per_page=int}} "댓글 목록 조회 성공"
-// @Failure 400 {object} object{error=object{code=string,message=string}} "INVALID_INPUT - slug 누락, 허용하지 않는 sort/direction 값" example({"error":{"code":"INVALID_INPUT","message":"Post slug is required"}})
+// @Success 200 {object} object{comments=[]models.Comment,sort=string,direction=string,pagination=object{current_page=int,total_pages=int,total_comments=int,per_page=int}} "댓글 목록 조회 성공"
+// @Failure 400 {object} object{error=object{code=string,message=string,details=object}} "INVALID_INPUT - slug 누락, 허용하지 않는 sort/direction 값" example({"error":{"code":"INVALID_INPUT","message":"Post slug is required"}})
 // @Failure 401 {object} object{error=object{code=string,message=string}} "MISSING_API_KEY - API 키 헤더 누락" example({"error":{"code":"MISSING_API_KEY","message":"API key is required"}})
 // @Failure 403 {object} object{error=object{code=string,message=string}} "INVALID_API_KEY | SITE_INACTIVE | INVALID_ORIGIN" example({"error":{"code":"INVALID_API_KEY","message":"Invalid API key"}})
 // @Failure 500 {object} object{error=object{code=string,message=string}} "INTERNAL_SERVER_ERROR - 서버 내부 오류" example({"error":{"code":"INTERNAL_SERVER_ERROR","message":"Internal server error"}})
@@ -306,7 +315,7 @@ func (h *CommentHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	// 정렬 파라미터 파싱 (기본값: created_at, desc)
 	sortField, direction, sortErr := parseCommentSort(r)
 	if sortErr != nil {
-		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid sort parameter", sortErr)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid sort parameters", sortErr)
 		return
 	}
 

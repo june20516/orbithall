@@ -826,6 +826,8 @@ func TestListComments_Success_EmptyPost(t *testing.T) {
 
 	var response struct {
 		Comments   []interface{} `json:"comments"`
+		Sort       string        `json:"sort"`
+		Direction  string        `json:"direction"`
 		Pagination struct {
 			TotalComments int `json:"total_comments"`
 		} `json:"pagination"`
@@ -839,6 +841,13 @@ func TestListComments_Success_EmptyPost(t *testing.T) {
 	}
 	if response.Pagination.TotalComments != 0 {
 		t.Errorf("Expected total_comments 0, got %d", response.Pagination.TotalComments)
+	}
+	// 포스트가 없어도 적용된 정렬(기본값)을 응답에 담는다
+	if response.Sort != "created_at" {
+		t.Errorf("Expected sort created_at, got %q", response.Sort)
+	}
+	if response.Direction != "desc" {
+		t.Errorf("Expected direction desc, got %q", response.Direction)
 	}
 }
 
@@ -1136,6 +1145,59 @@ func TestListComments_DefaultDirectionIsNewestFirst(t *testing.T) {
 	}
 }
 
+func TestListComments_ExplicitAscIsOldestFirst(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 최상위 댓글 2개
+	apiKey := testhelpers.CreateTestSite(ctx, t, tx, "Test Site", "sort-asc.test.com", []string{"http://localhost:3000"}, true).APIKey
+	site, _ := database.GetSiteByAPIKey(ctx, tx, apiKey)
+	post, _ := database.GetOrCreatePost(ctx, tx, site.ID, "test-post", "Test Post")
+
+	database.CreateComment(ctx, tx, post.ID, nil, "Author1", "pass", "First", "10.0.0.1", "Agent")
+	database.CreateComment(ctx, tx, post.ID, nil, "Author2", "pass", "Second", "10.0.0.2", "Agent")
+
+	handler := NewCommentHandler(tx)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/posts/test-post/comments?direction=asc", nil)
+	req.Header.Set("X-Orbithall-API-Key", apiKey)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("slug", "test-post")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(withSiteContext(req.Context(), site))
+	rec := httptest.NewRecorder()
+
+	// When: direction=asc로 조회
+	handler.ListComments(rec, req)
+
+	// Then: 오래된 댓글이 먼저 오고 응답의 direction이 실제로 asc다
+	// (direction 값을 그대로 echo하지 않고 "desc"로 하드코딩해도 이 검증 없이는 통과할 수 있으므로 명시적으로 확인한다)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var response struct {
+		Comments []struct {
+			Content string `json:"content"`
+		} `json:"comments"`
+		Direction string `json:"direction"`
+	}
+	json.NewDecoder(rec.Body).Decode(&response)
+
+	if len(response.Comments) != 2 {
+		t.Fatalf("Expected 2 comments, got %d", len(response.Comments))
+	}
+	if response.Comments[0].Content != "First" {
+		t.Errorf("Expected oldest comment first, got %q", response.Comments[0].Content)
+	}
+	if response.Direction != "asc" {
+		t.Errorf("Expected direction asc, got %q", response.Direction)
+	}
+}
+
 func TestListComments_InvalidSortParameters(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
@@ -1150,11 +1212,17 @@ func TestListComments_InvalidSortParameters(t *testing.T) {
 	handler := NewCommentHandler(tx)
 
 	cases := []struct {
-		name  string
-		query string
+		name               string
+		query              string
+		expectedStatus     int
+		expectedDetailKeys []string // expectedStatus가 400일 때만 확인
+		expectedDirection  string   // expectedStatus가 200일 때만 확인
 	}{
-		{name: "알 수 없는 정렬 기준", query: "?sort=author_name"},
-		{name: "알 수 없는 정렬 방향", query: "?direction=descending"},
+		{name: "알 수 없는 정렬 기준", query: "?sort=author_name", expectedStatus: http.StatusBadRequest, expectedDetailKeys: []string{"sort"}},
+		{name: "알 수 없는 정렬 방향", query: "?direction=descending", expectedStatus: http.StatusBadRequest, expectedDetailKeys: []string{"direction"}},
+		{name: "정렬 기준과 방향이 모두 잘못됨", query: "?sort=author_name&direction=descending", expectedStatus: http.StatusBadRequest, expectedDetailKeys: []string{"sort", "direction"}},
+		{name: "대문자 방향은 허용하지 않음", query: "?direction=DESC", expectedStatus: http.StatusBadRequest, expectedDetailKeys: []string{"direction"}},
+		{name: "빈 방향 값은 기본값(desc)으로 처리", query: "?direction=", expectedStatus: http.StatusOK, expectedDirection: "desc"},
 	}
 
 	for _, tc := range cases {
@@ -1169,19 +1237,41 @@ func TestListComments_InvalidSortParameters(t *testing.T) {
 
 			handler.ListComments(rec, req)
 
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+			if rec.Code != tc.expectedStatus {
+				t.Fatalf("Expected status %d, got %d", tc.expectedStatus, rec.Code)
+			}
+
+			if tc.expectedStatus == http.StatusBadRequest {
+				var response struct {
+					Error struct {
+						Code    string            `json:"code"`
+						Details map[string]string `json:"details"`
+					} `json:"error"`
+				}
+				json.NewDecoder(rec.Body).Decode(&response)
+
+				if response.Error.Code != ErrInvalidInput {
+					t.Errorf("Expected error code %s, got %s", ErrInvalidInput, response.Error.Code)
+				}
+
+				for _, key := range tc.expectedDetailKeys {
+					if _, ok := response.Error.Details[key]; !ok {
+						t.Errorf("Expected details to contain key %q, got %+v", key, response.Error.Details)
+					}
+				}
+				if len(response.Error.Details) != len(tc.expectedDetailKeys) {
+					t.Errorf("Expected %d detail key(s), got %d (%+v)", len(tc.expectedDetailKeys), len(response.Error.Details), response.Error.Details)
+				}
+				return
 			}
 
 			var response struct {
-				Error struct {
-					Code string `json:"code"`
-				} `json:"error"`
+				Direction string `json:"direction"`
 			}
 			json.NewDecoder(rec.Body).Decode(&response)
 
-			if response.Error.Code != ErrInvalidInput {
-				t.Errorf("Expected error code %s, got %s", ErrInvalidInput, response.Error.Code)
+			if response.Direction != tc.expectedDirection {
+				t.Errorf("Expected direction %q, got %q", tc.expectedDirection, response.Direction)
 			}
 		})
 	}
