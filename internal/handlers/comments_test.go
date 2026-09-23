@@ -902,6 +902,9 @@ func TestListComments_DeletedComments(t *testing.T) {
 			IsDeleted  bool          `json:"is_deleted"`
 			Replies    []interface{} `json:"replies"`
 		} `json:"comments"`
+		Pagination struct {
+			TotalComments int `json:"total_comments"`
+		} `json:"pagination"`
 	}
 
 	json.NewDecoder(rec.Body).Decode(&response)
@@ -926,6 +929,11 @@ func TestListComments_DeletedComments(t *testing.T) {
 	}
 
 	// alone은 대댓글이 없으므로 목록에서 완전히 제외됨
+
+	// 보이는 최상위 댓글만 센다 (답글 없이 삭제된 댓글은 total_comments에서도 빠진다)
+	if response.Pagination.TotalComments != 1 {
+		t.Errorf("Expected total_comments 1, got %d", response.Pagination.TotalComments)
+	}
 }
 
 func TestListComments_DeletedReplyUnderActiveParent(t *testing.T) {

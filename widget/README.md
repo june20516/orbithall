@@ -258,7 +258,7 @@ https://cdn.jsdelivr.net/gh/june20516/orbithall@{version}/static/embed.js
 https://cdn.jsdelivr.net/gh/june20516/orbithall@{version}/static/embed.css
 ```
 
-- 고정 버전(예: `@1.1.1`)을 권장합니다. jsDelivr가 1년 immutable 캐시로 제공하므로 한 번 받으면 바뀌지 않습니다.
+- 고정 버전(예: `@1.2.0`)을 권장합니다. jsDelivr가 1년 immutable 캐시로 제공하므로 한 번 받으면 바뀌지 않습니다.
 - 범위 버전(예: `@1`)은 1.x의 최신 버전을 따라갑니다. 다만 새 버전이 CDN에는 최대 12시간, 브라우저에는 최대 7일 늦게 반영됩니다.
 
 #### 1.1.1에서 1.2.0으로 올릴 때
