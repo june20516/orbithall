@@ -79,9 +79,9 @@ export function CommentWidget({
       console.error("OrbitHall: Failed to load comments", err);
       setError(toErrorMessage(err));
     } finally {
-      if (requestId === generationRef.current) {
-        setLoading(false);
-      }
+      // 세대 가드는 응답을 목록에 반영하는 것만 막는다.
+      // 로딩 표시까지 가드 안에서 끄면, 뒤늦게 끝난 요청이 표시를 켠 채로 남긴다.
+      setLoading(false);
     }
   };
 
@@ -133,9 +133,9 @@ export function CommentWidget({
       console.error("OrbitHall: Failed to load more comments", err);
       setLoadMoreError(t("comments.loadMoreError"));
     } finally {
-      if (requestId === generationRef.current) {
-        setLoadingMore(false);
-      }
+      // 여기서도 가드를 걸면, 더 보기 응답 전에 작성·수정·삭제가 끼어들었을 때
+      // 버튼이 "불러오는 중..." 상태로 굳어 다시 누를 수 없게 된다.
+      setLoadingMore(false);
     }
   };
 
