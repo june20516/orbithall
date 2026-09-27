@@ -2,7 +2,9 @@ package auth
 
 import (
 	"bytes"
-	"os"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +12,10 @@ import (
 
 // testRefreshTokenSecret은 테스트용 Refresh Token 비밀키입니다 (jwt_test.go의 JWT_SECRET과 다른 값)
 const testRefreshTokenSecret = "test-refresh-secret-at-least-32-characters-long"
+
+// testJWTSecretForRefreshValidation은 TestValidateRefreshTokenSecret 전용 JWT_SECRET입니다
+// jwt_test.go의 init()에 의존하지 않도록 32자 이상의 고정값을 직접 둡니다
+const testJWTSecretForRefreshValidation = "test-jwt-secret-for-refresh-validation-32+"
 
 // TestGenerateRefreshToken은 로그인 시 첫 Refresh Token 생성을 테스트합니다
 func TestGenerateRefreshToken(t *testing.T) {
@@ -82,6 +88,28 @@ func TestDeriveNextRefreshToken(t *testing.T) {
 			t.Errorf("expected prefix %q, got %q", RefreshTokenPrefix, next)
 		}
 	})
+
+	t.Run("HMAC-SHA256(비밀키, 입력)을 base64url로 인코딩한 값이다", func(t *testing.T) {
+		// Given: 입력과 비밀키로 독립적으로 계산한 기대값
+		const input = "ohrt_input"
+		mac := hmac.New(sha256.New, []byte(testRefreshTokenSecret))
+		mac.Write([]byte(input))
+		want := RefreshTokenPrefix + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+
+		// When: 파생
+		got, err := DeriveNextRefreshToken(input)
+
+		// Then: 독립적으로 계산한 값과 일치하고 길이도 일치함
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if got != want {
+			t.Errorf("expected %q, got %q", want, got)
+		}
+		if len(got) != len(RefreshTokenPrefix)+43 {
+			t.Errorf("expected length %d, got %d", len(RefreshTokenPrefix)+43, len(got))
+		}
+	})
 }
 
 // TestDeriveNextRefreshToken_DependsOnSecret은 비밀키가 바뀌면 파생 결과도 바뀌는지 테스트합니다
@@ -103,27 +131,38 @@ func TestDeriveNextRefreshToken_DependsOnSecret(t *testing.T) {
 // TestValidateRefreshTokenSecret은 비밀키 검증을 테스트합니다
 func TestValidateRefreshTokenSecret(t *testing.T) {
 	tests := []struct {
-		name    string
-		secret  string
-		wantErr bool
+		name            string
+		jwtSecret       string
+		secret          string
+		wantErrContains string
 	}{
-		{name: "비어 있으면 에러", secret: "", wantErr: true},
-		{name: "32자 미만이면 에러", secret: "too-short-secret", wantErr: true},
-		{name: "JWT_SECRET과 같으면 에러", secret: os.Getenv("JWT_SECRET"), wantErr: true},
-		{name: "32자 이상이고 JWT_SECRET과 다르면 통과", secret: testRefreshTokenSecret, wantErr: false},
+		{name: "비어 있으면 에러", jwtSecret: testJWTSecretForRefreshValidation, secret: "", wantErrContains: "at least 32 characters"},
+		{name: "32자 미만이면 에러", jwtSecret: testJWTSecretForRefreshValidation, secret: "too-short-secret", wantErrContains: "at least 32 characters"},
+		{name: "JWT_SECRET과 같으면 에러", jwtSecret: testJWTSecretForRefreshValidation, secret: testJWTSecretForRefreshValidation, wantErrContains: "differ from JWT_SECRET"},
+		{name: "32자 이상이고 JWT_SECRET과 다르면 통과", jwtSecret: testJWTSecretForRefreshValidation, secret: testRefreshTokenSecret, wantErrContains: ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Given: 비밀키 설정
+			// Given: JWT_SECRET과 REFRESH_TOKEN_SECRET 설정
+			t.Setenv("JWT_SECRET", tt.jwtSecret)
 			t.Setenv("REFRESH_TOKEN_SECRET", tt.secret)
 
 			// When: 검증
 			err := ValidateRefreshTokenSecret()
 
-			// Then: 기대한 에러 여부
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateRefreshTokenSecret() error = %v, wantErr %v", err, tt.wantErr)
+			// Then: 기대한 사유의 에러이거나 에러 없음
+			if tt.wantErrContains == "" {
+				if err != nil {
+					t.Errorf("ValidateRefreshTokenSecret() expected no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateRefreshTokenSecret() expected error containing %q, got nil", tt.wantErrContains)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Errorf("ValidateRefreshTokenSecret() error = %q, want it to contain %q", err.Error(), tt.wantErrContains)
 			}
 		})
 	}
