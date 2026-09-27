@@ -258,7 +258,9 @@ CREATE TABLE refresh_tokens (
     used_at TIMESTAMPTZ,
     revoked_at TIMESTAMPTZ,
     revoked_reason VARCHAR(30),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- 토큰 만료는 계열의 절대 만료를 넘을 수 없다 (IsExpired가 expires_at만 비교하는 전제)
+    CONSTRAINT chk_refresh_tokens_expiry CHECK (expires_at <= family_expires_at)
 );
 
 -- refresh_tokens 테이블 인덱스
@@ -1184,6 +1186,45 @@ func TestRotateRefreshToken(t *testing.T) {
 	})
 }
 
+// TestRotateRefreshToken_FamilyRevoked는 계열 폐기를 빠져나간 토큰이 회전되지 않는지 테스트합니다
+// 폐기와 동시에 진행된 회전이 만든 후속 토큰은 revoked_at이 비어 있을 수 있으므로, 같은 계열의 폐기 여부로 막아야 합니다
+func TestRotateRefreshToken_FamilyRevoked(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 폐기된 계열과, 같은 계열에서 폐기되지 않고 남은 토큰(동시 회전으로 폐기를 빠져나간 상황)
+	user := createRefreshTokenTestUser(ctx, t, tx)
+	familyExpiresAt := refreshTokenTestTime.Add(time.Hour)
+	first := createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-family-first", familyExpiresAt)
+	if err := RevokeRefreshTokenFamily(ctx, tx, first.FamilyID, models.RefreshTokenRevokedByReuse, refreshTokenTestTime); err != nil {
+		t.Fatalf("failed to revoke: %v", err)
+	}
+	var escapedID int64
+	err := tx.QueryRowContext(ctx, `
+		INSERT INTO refresh_tokens (user_id, family_id, parent_id, token_hash, expires_at, family_expires_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
+		RETURNING id
+	`, user.ID, first.FamilyID, first.ID, []byte("hash-escaped"), familyExpiresAt).Scan(&escapedID)
+	if err != nil {
+		t.Fatalf("failed to insert escaped token: %v", err)
+	}
+
+	// When: 남은 토큰으로 회전
+	child, err := RotateRefreshToken(ctx, tx, escapedID, []byte("hash-escaped-child"), familyExpiresAt, refreshTokenTestTime)
+
+	// Then: nil, nil이고 남은 토큰은 사용 처리되지 않음
+	if err != nil || child != nil {
+		t.Errorf("expected nil, nil; got %+v, %v", child, err)
+	}
+	escaped, _ := GetRefreshTokenByHash(ctx, tx, []byte("hash-escaped"))
+	if escaped.UsedAt != nil {
+		t.Errorf("expected escaped token to stay unused, got UsedAt %v", escaped.UsedAt)
+	}
+}
+
 // TestGetChildRefreshToken은 후속 토큰 조회를 테스트합니다
 func TestGetChildRefreshToken(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
@@ -1393,7 +1434,11 @@ func GetChildRefreshToken(ctx context.Context, db DBTX, parentID int64) (*models
 // 같은 부모로 동시에 요청이 와도 한 요청만 성공하고, 나머지는 nil을 받습니다
 // (부모 행을 먼저 잠근 요청이 커밋되면 다른 요청의 WHERE 조건이 다시 평가되어 0행이 됩니다)
 //
-// 부모가 이미 사용되었거나 폐기되었으면 nil, nil을 반환합니다
+// 같은 계열에 폐기된 토큰이 하나라도 있으면 회전하지 않습니다
+// 계열 폐기 UPDATE는 문장 시작 시점에 보이는 행만 폐기하므로, 동시에 진행 중이던 회전이 만든 후속 토큰은
+// 폐기되지 않은 채 남을 수 있습니다. 이 조건이 그런 토큰으로 세션이 이어지는 것을 막습니다
+//
+// 부모가 이미 사용되었거나, 폐기되었거나, 계열이 폐기되었으면 nil, nil을 반환합니다
 func RotateRefreshToken(ctx context.Context, db DBTX, parentID int64, childHash []byte, childExpiresAt, now time.Time) (*models.RefreshToken, error) {
 	// INSERT ... SELECT의 SELECT 목록에 쓴 파라미터는 타입을 추론하지 못하므로 명시적으로 캐스팅합니다
 	query := `
@@ -1401,6 +1446,10 @@ func RotateRefreshToken(ctx context.Context, db DBTX, parentID int64, childHash 
 			UPDATE refresh_tokens
 			SET used_at = $2
 			WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM refresh_tokens AS revoked
+					WHERE revoked.family_id = refresh_tokens.family_id AND revoked.revoked_at IS NOT NULL
+				)
 			RETURNING id, user_id, family_id, family_expires_at
 		)
 		INSERT INTO refresh_tokens (user_id, family_id, parent_id, token_hash, expires_at, family_expires_at)
@@ -2202,8 +2251,8 @@ func rotateSession(ctx context.Context, db database.DBTX, presented string, cfg 
 	}
 
 	if next == nil {
-		// 같은 토큰으로 들어온 다른 요청이 먼저 회전했습니다
-		// 방금 사용 처리된 상태를 다시 읽어 유예 시간 규칙으로 판단합니다
+		// 같은 토큰으로 들어온 다른 요청이 먼저 회전했거나, 계열이 폐기되었습니다
+		// 상태를 다시 읽어, 사용 처리된 경우에만 유예 시간 규칙으로 판단합니다
 		current, err = database.GetRefreshTokenByHash(ctx, db, presentedHash)
 		if err != nil {
 			return nil, err
