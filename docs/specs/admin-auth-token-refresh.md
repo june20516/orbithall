@@ -337,7 +337,7 @@ CREATE TABLE refresh_tokens (
     family_expires_at  TIMESTAMPTZ NOT NULL,              -- 절대 만료 (최초 로그인 + 30일)
     used_at            TIMESTAMPTZ,                       -- 회전에 사용된 시각
     revoked_at         TIMESTAMPTZ,
-    revoked_reason     TEXT,                              -- logout | reuse_detected | user_deleted
+    revoked_reason     TEXT,                              -- logout | reuse_detected (사용자 삭제 시에는 행이 CASCADE로 삭제됨)
     created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_refresh_tokens_family ON refresh_tokens(family_id);
