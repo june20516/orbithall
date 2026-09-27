@@ -18,7 +18,9 @@ CREATE TABLE refresh_tokens (
     used_at TIMESTAMPTZ,
     revoked_at TIMESTAMPTZ,
     revoked_reason VARCHAR(30),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- 토큰 만료는 계열의 절대 만료를 넘을 수 없다 (IsExpired가 expires_at만 비교하는 전제)
+    CONSTRAINT chk_refresh_tokens_expiry CHECK (expires_at <= family_expires_at)
 );
 
 -- refresh_tokens 테이블 인덱스
