@@ -4,7 +4,7 @@
 2026-09-28
 
 ## 버전
-v1.4 (호환 필드 없이 단일 배포)
+v1.5 (로그인 경로 보강)
 
 ## 개요
 어드민 로그인 세션에 **회전(rotation)되는 Refresh Token**을 도입해, Access Token이 만료되면 재로그인 없이 연장할 수 있게 한다.
@@ -89,7 +89,7 @@ POST /auth/google/verify
 Content-Type: application/json
 ```
 
-**요청** (변경 없음)
+**요청** (형식 변경 없음)
 ```json
 {
   "id_token": "<Google ID Token>",
@@ -98,6 +98,7 @@ Content-Type: application/json
   "picture": "https://..."
 }
 ```
+- `id_token`만 필수다. `email`·`name`·`picture`는 선택이며 서버는 ID Token의 검증된 값을 우선 사용한다. 검증되지 않은 이메일의 ID Token은 401 `INVALID_ID_TOKEN`이다.
 
 **응답 200**
 ```json
@@ -132,7 +133,7 @@ Content-Type: application/json
 | 상태 | `code` | 의미 |
 |------|--------|------|
 | 400 | `INVALID_INPUT` | JSON 오류, 필수 필드 누락, Content-Type 오류 |
-| 401 | `INVALID_ID_TOKEN` | Google ID Token 검증 실패 |
+| 401 | `INVALID_ID_TOKEN` | Google ID Token 검증 실패 (이메일 미검증 포함) |
 | 500 | `INTERNAL_SERVER_ERROR` | 서버 오류 |
 
 ### 2.2 토큰 갱신 (신규)
@@ -421,3 +422,4 @@ CREATE UNIQUE INDEX idx_refresh_tokens_parent_id ON refresh_tokens(parent_id) WH
 | 2026-09-28 | v1.2 | 회전을 단일 SQL 문장으로, `replaced_by_id` → `parent_id`, rate limit은 refresh만, 로그인 시 정리, 클레임 필수화는 3단계, 에러 코드를 기존 상수(INVALID_INPUT·INTERNAL_SERVER_ERROR·RATE_LIMIT_EXCEEDED)에 맞춤 | Bran |
 | 2026-09-28 | v1.3 | Access Token 클레임(`typ`·`iss`·`aud`) 검증을 1단계에서 바로 필수로 적용 | Bran |
 | 2026-09-28 | v1.4 | 호환용 `token` 필드 제거, 전환 단계를 함께 배포 한 번으로 통합 | Bran |
+| 2026-09-28 | v1.5 | 로그인 시 ID Token의 검증된 이메일·이름·사진 우선 사용(요청 본문 `email`·`name` 선택), 이메일 미검증 토큰 거부 | Bran |

@@ -14,6 +14,7 @@ import (
 
 	"github.com/june20516/orbithall/internal/auth"
 	"github.com/june20516/orbithall/internal/database"
+	"github.com/june20516/orbithall/internal/models"
 	"github.com/june20516/orbithall/internal/testhelpers"
 )
 
@@ -24,7 +25,8 @@ func init() {
 	os.Setenv("GOOGLE_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
 }
 
-// TestGoogleVerify_MissingFields는 필수 필드 누락 시 400 에러를 테스트합니다
+// TestGoogleVerify_MissingFields는 필수 필드(id_token) 누락 시 400 에러를 테스트합니다
+// email·name·picture는 선택이므로 누락되어도 400이 아닙니다 (TestGoogleVerify_UsesVerifiedClaims 참고)
 func TestGoogleVerify_MissingFields(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer database.Close(db)
@@ -38,14 +40,6 @@ func TestGoogleVerify_MissingFields(t *testing.T) {
 		{
 			name:        "id_token 누락",
 			requestBody: map[string]interface{}{"email": "test@example.com", "name": "Test User"},
-		},
-		{
-			name:        "email 누락",
-			requestBody: map[string]interface{}{"id_token": "token", "name": "Test User"},
-		},
-		{
-			name:        "name 누락",
-			requestBody: map[string]interface{}{"id_token": "token", "email": "test@example.com"},
 		},
 		{
 			name:        "빈 요청 본문",
@@ -174,10 +168,16 @@ func newGoogleVerifyTestIdentity(t *testing.T, db *sql.DB) (googleID string, ema
 
 // newGoogleVerifyTestHandler는 Google 검증 결과를 고정 payload로, 현재 시각을 고정 시각으로 바꾼 핸들러를 만듭니다
 func newGoogleVerifyTestHandler(db *sql.DB, googleID string, email string) *AuthHandler {
+	return newGoogleVerifyTestHandlerWithPayload(db, auth.GoogleIDTokenPayload{GoogleID: googleID, Email: email, Name: "Google Verify User"})
+}
+
+// newGoogleVerifyTestHandlerWithPayload는 Google 검증 결과로 payload를 돌려주는 핸들러를 만듭니다
+func newGoogleVerifyTestHandlerWithPayload(db *sql.DB, payload auth.GoogleIDTokenPayload) *AuthHandler {
 	handler := NewAuthHandler(db)
 	handler.now = func() time.Time { return googleVerifyTestTime }
 	handler.verifyIDToken = func(ctx context.Context, idToken string) (*auth.GoogleIDTokenPayload, error) {
-		return &auth.GoogleIDTokenPayload{GoogleID: googleID, Email: email, Name: "Google Verify User"}, nil
+		verified := payload
+		return &verified, nil
 	}
 	return handler
 }
@@ -185,11 +185,17 @@ func newGoogleVerifyTestHandler(db *sql.DB, googleID string, email string) *Auth
 // callGoogleVerify는 유효한 형식의 로그인 요청으로 GoogleVerify를 호출합니다
 func callGoogleVerify(t *testing.T, handler *AuthHandler, email string) *httptest.ResponseRecorder {
 	t.Helper()
-	bodyBytes, err := json.Marshal(map[string]interface{}{
+	return callGoogleVerifyWithBody(t, handler, map[string]interface{}{
 		"id_token": "fake-google-id-token",
 		"email":    email,
 		"name":     "Google Verify User",
 	})
+}
+
+// callGoogleVerifyWithBody는 주어진 요청 본문으로 GoogleVerify를 호출합니다
+func callGoogleVerifyWithBody(t *testing.T, handler *AuthHandler, requestBody map[string]interface{}) *httptest.ResponseRecorder {
+	t.Helper()
+	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
 		t.Fatalf("failed to marshal request body: %v", err)
 	}
@@ -376,4 +382,116 @@ func TestGoogleVerify_SessionFailureRollsBackUser(t *testing.T) {
 	if count := countRefreshTokensByGoogleID(t, db, googleID); count != 0 {
 		t.Errorf("refresh_tokens rows = %d, want 0", count)
 	}
+}
+
+// mustGetUserByGoogleID는 google_id 사용자를 조회하고, 없으면 테스트를 중단합니다
+func mustGetUserByGoogleID(t *testing.T, db *sql.DB, googleID string) *models.User {
+	t.Helper()
+	user, err := database.GetUserByGoogleID(context.Background(), db, googleID)
+	if err != nil {
+		t.Fatalf("failed to get user: %v", err)
+	}
+	if user == nil {
+		t.Fatalf("user %s was not created", googleID)
+	}
+	return user
+}
+
+// TestGoogleVerify_UsesVerifiedClaims는 사용자 생성 시 요청 본문보다 ID Token의 검증된 값을 우선 쓰는지 테스트합니다
+func TestGoogleVerify_UsesVerifiedClaims(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping committed login test in short mode")
+	}
+	db := testhelpers.SetupTestDB(t)
+	t.Cleanup(func() { database.Close(db) })
+
+	t.Run("요청 본문 email이 ID Token과 달라도 ID Token의 이메일·이름·사진으로 저장한다", func(t *testing.T) {
+		// Given: 검증된 payload와 다른 값을 담은 요청 본문
+		googleID, email := newGoogleVerifyTestIdentity(t, db)
+		handler := newGoogleVerifyTestHandlerWithPayload(db, auth.GoogleIDTokenPayload{
+			GoogleID: googleID,
+			Email:    email,
+			Name:     "Verified Name",
+			Picture:  "https://example.com/verified.jpg",
+		})
+
+		// When: 다른 이메일·이름·사진으로 로그인 요청
+		rec := callGoogleVerifyWithBody(t, handler, map[string]interface{}{
+			"id_token": "fake-google-id-token",
+			"email":    "attacker-" + email,
+			"name":     "Request Name",
+			"picture":  "https://example.com/request.jpg",
+		})
+
+		// Then: 200이고 저장된 사용자와 응답은 payload 값
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+		stored := mustGetUserByGoogleID(t, db, googleID)
+		if stored.Email != email || stored.Name != "Verified Name" || stored.PictureURL != "https://example.com/verified.jpg" {
+			t.Errorf("stored user = %+v, want payload values", stored)
+		}
+		body := decodeGoogleVerifyResponse(t, rec)
+		if body.User == nil || body.User.Email != email {
+			t.Errorf("response user = %+v, want email %q", body.User, email)
+		}
+	})
+
+	t.Run("id_token만 보내도 로그인에 성공한다", func(t *testing.T) {
+		// Given: 이메일·이름이 있는 payload, id_token만 담은 요청
+		googleID, email := newGoogleVerifyTestIdentity(t, db)
+		handler := newGoogleVerifyTestHandlerWithPayload(db, auth.GoogleIDTokenPayload{GoogleID: googleID, Email: email, Name: "Verified Name"})
+
+		// When: 로그인 요청
+		rec := callGoogleVerifyWithBody(t, handler, map[string]interface{}{"id_token": "fake-google-id-token"})
+
+		// Then: 200이고 payload 값으로 저장
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+		stored := mustGetUserByGoogleID(t, db, googleID)
+		if stored.Email != email || stored.Name != "Verified Name" {
+			t.Errorf("stored user = %+v", stored)
+		}
+	})
+
+	t.Run("ID Token에 이름·사진이 없으면 요청 본문 값을 쓴다", func(t *testing.T) {
+		// Given: 이름·사진이 없는 payload
+		googleID, email := newGoogleVerifyTestIdentity(t, db)
+		handler := newGoogleVerifyTestHandlerWithPayload(db, auth.GoogleIDTokenPayload{GoogleID: googleID, Email: email})
+
+		// When: 이름·사진을 담은 요청
+		rec := callGoogleVerifyWithBody(t, handler, map[string]interface{}{
+			"id_token": "fake-google-id-token",
+			"name":     "Request Name",
+			"picture":  "https://example.com/request.jpg",
+		})
+
+		// Then: 요청 본문의 이름·사진으로 저장
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+		stored := mustGetUserByGoogleID(t, db, googleID)
+		if stored.Name != "Request Name" || stored.PictureURL != "https://example.com/request.jpg" {
+			t.Errorf("stored user = %+v, want request name and picture", stored)
+		}
+	})
+
+	t.Run("ID Token과 요청 본문 모두 이름이 없으면 이메일을 이름으로 쓴다", func(t *testing.T) {
+		// Given: 이름이 없는 payload
+		googleID, email := newGoogleVerifyTestIdentity(t, db)
+		handler := newGoogleVerifyTestHandlerWithPayload(db, auth.GoogleIDTokenPayload{GoogleID: googleID, Email: email})
+
+		// When: 이름 없는 요청
+		rec := callGoogleVerifyWithBody(t, handler, map[string]interface{}{"id_token": "fake-google-id-token"})
+
+		// Then: 이메일이 이름으로 저장됨
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+		stored := mustGetUserByGoogleID(t, db, googleID)
+		if stored.Name != email {
+			t.Errorf("Name = %q, want %q", stored.Name, email)
+		}
+	})
 }

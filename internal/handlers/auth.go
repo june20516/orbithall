@@ -35,10 +35,15 @@ func NewAuthHandler(db *sql.DB) *AuthHandler {
 }
 
 // GoogleVerifyRequest는 Google ID Token 검증 요청 본문입니다
+// id_token만 필수입니다. email·name·picture는 선택이며, 서버는 ID Token의 검증된 값을 우선 사용합니다
 type GoogleVerifyRequest struct {
+	// IDToken은 Google이 발급한 ID Token입니다 (필수)
 	IDToken string `json:"id_token"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
+	// Email은 선택입니다. 저장되는 이메일은 항상 ID Token의 검증된 이메일이며 이 값은 쓰지 않습니다
+	Email string `json:"email"`
+	// Name은 선택입니다. ID Token에 이름이 없을 때만 사용합니다
+	Name string `json:"name"`
+	// Picture는 선택입니다. ID Token에 사진이 없을 때만 사용합니다
 	Picture string `json:"picture"`
 }
 
@@ -53,6 +58,8 @@ type GoogleVerifyResponse struct {
 //
 // @Summary      Google OAuth 인증 및 토큰 발급
 // @Description  Google ID Token을 검증하고 사용자를 생성/조회한 후 Access Token과 Refresh Token을 발급합니다
+// @Description  id_token만 필수입니다. email·name·picture는 선택이며, 서버는 ID Token의 검증된 값을 우선 사용합니다
+// @Description  이메일이 검증되지 않은(email_verified가 true가 아닌) ID Token은 401 INVALID_ID_TOKEN입니다
 // @Tags         auth
 // @Accept       json
 // @Produce      json
@@ -80,14 +87,6 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	// 3. 입력 검증
 	if req.IDToken == "" {
 		respondError(w, http.StatusBadRequest, ErrInvalidInput, "id_token is required", nil)
-		return
-	}
-	if req.Email == "" {
-		respondError(w, http.StatusBadRequest, ErrInvalidInput, "email is required", nil)
-		return
-	}
-	if req.Name == "" {
-		respondError(w, http.StatusBadRequest, ErrInvalidInput, "name is required", nil)
 		return
 	}
 
@@ -122,12 +121,7 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 
 	// 7. 사용자가 없으면 생성
 	if user == nil {
-		user = &models.User{
-			Email:      req.Email,
-			Name:       req.Name,
-			PictureURL: req.Picture,
-			GoogleID:   payload.GoogleID,
-		}
+		user = newUserFromGoogle(payload, req)
 
 		if err := database.CreateUser(r.Context(), tx, user); err != nil {
 			log.Printf("[ERROR] google verify: create user: %v", err)
@@ -159,4 +153,30 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 		TokenPairResponse: *pair,
 		User:              user,
 	})
+}
+
+// newUserFromGoogle은 신규 사용자 정보를 만듭니다
+// 이메일은 Google이 검증한 ID Token 값만 씁니다. 요청 본문은 클라이언트가 임의로 바꿀 수 있기 때문입니다
+// 이름과 사진은 ID Token 값을 우선 쓰고, 없으면 요청 본문 값을 씁니다
+// 이름이 둘 다 없으면 users.name이 필수이므로 이메일을 이름으로 씁니다
+func newUserFromGoogle(payload *auth.GoogleIDTokenPayload, req GoogleVerifyRequest) *models.User {
+	name := firstNonEmpty(payload.Name, req.Name, payload.Email)
+	picture := firstNonEmpty(payload.Picture, req.Picture)
+
+	return &models.User{
+		Email:      payload.Email,
+		Name:       name,
+		PictureURL: picture,
+		GoogleID:   payload.GoogleID,
+	}
+}
+
+// firstNonEmpty는 인자 중 처음으로 비어 있지 않은 문자열을 반환합니다 (모두 비면 빈 문자열)
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

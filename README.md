@@ -170,6 +170,7 @@ POST /auth/logout          # Refresh Token이 속한 세션 폐기 (204)
   "name": "사용자 이름"
 }
 ```
+`id_token`만 필수이며, `email`·`name`은 선택입니다. 서버는 ID Token의 검증된 이메일·이름·사진을 우선 사용하고, 이메일이 검증되지 않은 ID Token은 401 `INVALID_ID_TOKEN`으로 거부합니다.
 
 로그인·갱신 응답의 토큰 필드:
 ```json
