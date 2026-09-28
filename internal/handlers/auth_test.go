@@ -246,7 +246,7 @@ func TestGoogleVerify_NewUserSuccess(t *testing.T) {
 	// When: GoogleVerify 호출
 	rec := callGoogleVerify(t, handler, email)
 
-	// Then: 200과 토큰 쌍, 호환용 token, 생성된 사용자, 캐시 금지 헤더
+	// Then: 200과 토큰 쌍, 생성된 사용자, 캐시 금지 헤더
 	if rec.Code != http.StatusOK {
 		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
 	}
@@ -263,6 +263,9 @@ func TestGoogleVerify_NewUserSuccess(t *testing.T) {
 			t.Errorf("response is missing %q", field)
 		}
 	}
+	if _, ok := raw["token"]; ok {
+		t.Error("response must not include the token field (use access_token)")
+	}
 
 	body := decodeGoogleVerifyResponse(t, rec)
 	if body.TokenType != "Bearer" {
@@ -273,9 +276,6 @@ func TestGoogleVerify_NewUserSuccess(t *testing.T) {
 	}
 	if body.RefreshToken == "" {
 		t.Error("refresh_token is empty")
-	}
-	if body.Token != body.AccessToken {
-		t.Errorf("token = %q, want access_token %q", body.Token, body.AccessToken)
 	}
 
 	// Then: Refresh Token 만료는 주입한 시각 + 기본 유휴 수명(14일)

@@ -46,9 +46,6 @@ type GoogleVerifyRequest struct {
 type GoogleVerifyResponse struct {
 	TokenPairResponse
 
-	// Token은 access_token과 같은 값입니다 (token 필드만 읽는 클라이언트 호환용, 전환 3단계에서 제거)
-	Token string `json:"token"`
-
 	User *models.User `json:"user"`
 }
 
@@ -159,7 +156,6 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	respondJSON(w, http.StatusOK, GoogleVerifyResponse{
 		TokenPairResponse: *pair,
-		Token:             pair.AccessToken,
 		User:              user,
 	})
 }

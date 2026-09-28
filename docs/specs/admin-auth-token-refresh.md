@@ -4,7 +4,7 @@
 2026-09-28
 
 ## 버전
-v1.3 (클레임 검증 즉시 적용)
+v1.4 (호환 필드 없이 단일 배포)
 
 ## 개요
 어드민 로그인 세션에 **회전(rotation)되는 Refresh Token**을 도입해, Access Token이 만료되면 재로그인 없이 연장할 수 있게 한다.
@@ -107,7 +107,6 @@ Content-Type: application/json
   "access_token_expires_at": "2026-10-01T12:15:00Z",
   "refresh_token": "ohrt_Q2x1ZGUgcmVmcmVzaCB0b2tlbiBleGFtcGxl...",
   "refresh_token_expires_at": "2026-10-15T12:00:00Z",
-  "token": "eyJhbGciOiJIUzI1NiIs...",
   "user": {
     "id": 1,
     "email": "user@example.com",
@@ -126,7 +125,6 @@ Content-Type: application/json
 | `access_token_expires_at` | Access Token 만료 시각 (RFC 3339, UTC) |
 | `refresh_token` | 갱신용 토큰. `ohrt_` 접두사 + base64url |
 | `refresh_token_expires_at` | Refresh Token 만료 시각 (유휴·절대 만료 중 빠른 쪽) |
-| `token` | **Deprecated.** `access_token`과 같은 값. 전환 기간 호환용이며 다음 버전에서 제거 |
 | `user` | 기존과 동일 |
 
 **에러** (상태 코드는 유지하고 본문만 객체 형식으로 변경)
@@ -148,7 +146,7 @@ Content-Type: application/json
 { "refresh_token": "ohrt_..." }
 ```
 
-**응답 200**: 로그인 응답에서 `user`와 `token`을 뺀 형태
+**응답 200**: 로그인 응답에서 `user`를 뺀 형태
 ```json
 {
   "token_type": "Bearer",
@@ -200,7 +198,7 @@ Content-Type: application/json
 - 헤더: `Authorization: Bearer <access_token>`
 - 기존 에러 코드를 유지하되, 본문은 객체 형식(`error.code`)으로 바뀐다: `MISSING_TOKEN`, `INVALID_TOKEN`, `EXPIRED_TOKEN`, `USER_NOT_FOUND`
 - Access Token에 `typ: "access"`, `iss: "orbithall"`, `aud: "orbithall-admin"`, `jti` 클레임을 추가한다. 백엔드는 `typ`·`iss`·`aud` 중 하나라도 없거나 다르면 `INVALID_TOKEN`으로 거부한다.
-  - 이 클레임이 없는 기존 토큰은 1단계 배포 즉시 거부된다. 기존 로그인 사용자는 한 번 다시 로그인해야 한다(7장).
+  - 이 클레임이 없는 기존 토큰은 배포 즉시 거부된다. 기존 로그인 사용자는 한 번 다시 로그인해야 한다(7장).
   - `exp`도 필수이며, 서명 알고리즘은 HS256만 받는다.
   - 서명이 유효하고 만료된 토큰은 다른 클레임 오류와 관계없이 `EXPIRED_TOKEN`으로 응답한다. 클라이언트의 갱신 가능 여부는 Refresh Token으로만 판단되므로, 만료를 먼저 알려 갱신을 시도하게 한다.
 
@@ -276,7 +274,7 @@ R1 ──사용──> R2 ──사용──> R3
 - 갱신이 401로 실패하면 저장된 백엔드 토큰을 지우고 `backendAuthError = "RefreshFailed"`로 표시한 뒤 `/login`으로 보낸다.
 
 ### 4.5 로깅
-- `refresh_token`, `access_token`, `token` 필드는 로그에서 반드시 마스킹한다.
+- `refresh_token`, `access_token` 필드는 로그에서 반드시 마스킹한다.
 - `lib/utils/redact.ts`에 `access_token`, `refresh_token`은 이미 있다. 새 필드명(`backendAccessToken` 등)을 쓴다면 추가한다.
 
 ### 4.6 시퀀스
@@ -366,15 +364,17 @@ CREATE UNIQUE INDEX idx_refresh_tokens_parent_id ON refresh_tokens(parent_id) WH
 
 ---
 
-## 7. 전환 계획 (호환성)
+## 7. 배포 (호환성)
 
-| 단계 | 백엔드 | 클라이언트 |
-|------|--------|-----------|
-| 1 | 새 필드와 `/auth/refresh`, `/auth/logout` 배포. `token` 필드 유지. 에러 본문 객체 형식 적용. Access Token 클레임 검증 필수 | 변경 없음. 기존 세션은 401 → 재로그인 |
-| 2 | - | 새 필드 저장, 갱신·로그아웃 구현, `error.code` 기반 사후 갱신 적용 후 배포 |
-| 3 | `token` 필드 제거 | `token` 참조 제거 확인 |
+호환 기간 없이 백엔드와 클라이언트를 **함께 배포**한다. 사용자가 적어 짧은 중단과 재로그인을 감수한다.
 
-- 1단계 이전에 발급된 Access Token은 클레임이 없어 배포 즉시 `INVALID_TOKEN`으로 거부되고, 해당 사용자는 재로그인한다. 사용자가 적어 호환 기간을 두지 않는다.
+| 대상 | 변경 |
+|------|------|
+| 백엔드 | 토큰 쌍 응답, `/auth/refresh`·`/auth/logout`, 에러 본문 객체 형식, Access Token 클레임 검증 필수 |
+| 클라이언트 | 로그인 응답의 `access_token`·`refresh_token` 저장(기존 `token` 필드는 없음), 갱신·로그아웃 구현, `error.code` 기반 사후 갱신 |
+
+- 로그인 응답에 기존 `token` 필드가 없다. 클라이언트가 바뀌기 전에 백엔드가 먼저 배포되면, 그 사이에는 로그인이 실패한다.
+- 기존 Access Token은 클레임이 없어 배포 즉시 `INVALID_TOKEN`으로 거부된다. 로그인해 있던 사용자는 다시 로그인해야 한다.
 
 ---
 
@@ -420,3 +420,4 @@ CREATE UNIQUE INDEX idx_refresh_tokens_parent_id ON refresh_tokens(parent_id) WH
 | 2026-09-28 | v1.1 | Access Token 7일로 변경, 에러 본문 객체 형식 통일, 유예 시간 재사용 시 기존 R2 재반환 | Bran |
 | 2026-09-28 | v1.2 | 회전을 단일 SQL 문장으로, `replaced_by_id` → `parent_id`, rate limit은 refresh만, 로그인 시 정리, 클레임 필수화는 3단계, 에러 코드를 기존 상수(INVALID_INPUT·INTERNAL_SERVER_ERROR·RATE_LIMIT_EXCEEDED)에 맞춤 | Bran |
 | 2026-09-28 | v1.3 | Access Token 클레임(`typ`·`iss`·`aud`) 검증을 1단계에서 바로 필수로 적용 | Bran |
+| 2026-09-28 | v1.4 | 호환용 `token` 필드 제거, 전환 단계를 함께 배포 한 번으로 통합 | Bran |

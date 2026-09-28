@@ -182,8 +182,6 @@ POST /auth/logout          # Refresh Token이 속한 세션 폐기 (204)
 }
 ```
 
-로그인 응답에는 `access_token`과 같은 값의 `token` 필드도 들어 있습니다(구 클라이언트 호환용, 제거 예정).
-
 갱신·로그아웃 요청 본문은 `{"refresh_token": "ohrt_..."}`입니다. 인증 에러는 `{"error": {"code": "EXPIRED_TOKEN", "message": "..."}}` 형식입니다.
 
 #### 사이트 관리
