@@ -170,30 +170,49 @@ func DeleteStaleRefreshTokens(ctx context.Context, db DBTX, userID int64, before
 	return nil
 }
 
-// PruneRefreshTokenFamilies는 사용자의 계열(로그인 세션) 중 가장 최근 keep개만 남기고 나머지 계열의 토큰을 모두 삭제합니다
+// PruneRefreshTokenFamilies는 사용자의 활성 계열(로그인 세션) 중 가장 최근 keep개만 남기고
+// 나머지 활성 계열의 토큰을 모두 삭제합니다
+//
+// 계열이 활성이려면 두 조건을 모두 만족해야 합니다
+//   - 계열에 폐기된 토큰이 하나도 없음 (revoked_at IS NOT NULL인 행이 없음)
+//   - 계열의 가장 최근 토큰(id 최댓값)의 expires_at이 now보다 뒤 (아직 만료되지 않음)
+//
+// 활성 계열만 id 최댓값 기준 내림차순으로 정렬해 keep개를 넘는 오래된 활성 계열만 삭제합니다
+// 폐기되었거나 만료된 계열은 상한 계산과 삭제 대상 어디에도 포함하지 않습니다
+// (이런 계열은 DeleteStaleRefreshTokens가 보관 기간이 지난 뒤 별도로 정리합니다)
 //
 // 계열의 최근 여부는 계열에 속한 토큰 id의 최댓값으로 판단합니다
 // id는 저장 순서대로 커지므로, 먼저 로그인했더라도 최근에 회전된 계열은 최근 계열로 봅니다
 // (created_at은 같은 트랜잭션 안에서 같은 값이 될 수 있어 순서 기준으로 쓰지 않습니다)
 // 삭제된 계열의 Refresh Token은 더 이상 조회되지 않으므로 무효 토큰으로 처리됩니다
-func PruneRefreshTokenFamilies(ctx context.Context, db DBTX, userID int64, keep int) error {
+func PruneRefreshTokenFamilies(ctx context.Context, db DBTX, userID int64, keep int, now time.Time) error {
 	if keep < 1 {
 		return fmt.Errorf("keep must be at least 1, got %d", keep)
 	}
 
 	query := `
-		DELETE FROM refresh_tokens
-		WHERE user_id = $1 AND family_id IN (
-			SELECT family_id
+		WITH families AS (
+			SELECT family_id, MAX(id) AS max_id, BOOL_OR(revoked_at IS NOT NULL) AS has_revoked
 			FROM refresh_tokens
 			WHERE user_id = $1
 			GROUP BY family_id
-			ORDER BY MAX(id) DESC
-			OFFSET $2
+		),
+		active_families AS (
+			SELECT f.family_id, f.max_id
+			FROM families f
+			JOIN refresh_tokens latest ON latest.id = f.max_id
+			WHERE NOT f.has_revoked AND latest.expires_at > $2
+		)
+		DELETE FROM refresh_tokens
+		WHERE user_id = $1 AND family_id IN (
+			SELECT family_id
+			FROM active_families
+			ORDER BY max_id DESC
+			OFFSET $3
 		)
 	`
 
-	if _, err := db.ExecContext(ctx, query, userID, keep); err != nil {
+	if _, err := db.ExecContext(ctx, query, userID, now, keep); err != nil {
 		return fmt.Errorf("failed to prune refresh token families: %w", err)
 	}
 

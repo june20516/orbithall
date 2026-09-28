@@ -492,7 +492,7 @@ func TestPruneRefreshTokenFamilies(t *testing.T) {
 		}
 
 		// When: 3개만 남기도록 정리
-		err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 3)
+		err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 3, refreshTokenTestTime)
 
 		// Then: 가장 최근 3개 계열만 남고, 삭제된 계열은 회전된 토큰까지 모두 삭제됨
 		if err != nil {
@@ -525,7 +525,7 @@ func TestPruneRefreshTokenFamilies(t *testing.T) {
 		}
 
 		// When: 2개만 남기도록 정리
-		if err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 2); err != nil {
+		if err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 2, refreshTokenTestTime); err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
 
@@ -549,7 +549,7 @@ func TestPruneRefreshTokenFamilies(t *testing.T) {
 		createTestRefreshTokenFamilies(ctx, t, tx, user.ID, "hash-prune-under", 3)
 
 		// When: 상한 3으로 정리
-		if err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 3); err != nil {
+		if err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 3, refreshTokenTestTime); err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
 
@@ -573,7 +573,7 @@ func TestPruneRefreshTokenFamilies(t *testing.T) {
 		createTestRefreshTokenFamilies(ctx, t, tx, user.ID, "hash-prune-self", 3)
 
 		// When: 첫 사용자만 1개로 정리
-		if err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 1); err != nil {
+		if err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 1, refreshTokenTestTime); err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
 
@@ -586,6 +586,121 @@ func TestPruneRefreshTokenFamilies(t *testing.T) {
 		}
 	})
 
+	t.Run("폐기된 계열은 상한 계산에서 제외되고 삭제되지 않는다", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 폐기된 계열 2개와 활성 계열 3개(상한과 같음)
+		user := createRefreshTokenTestUser(ctx, t, tx)
+		familyExpiresAt := refreshTokenTestTime.Add(time.Hour)
+		for i := 0; i < 2; i++ {
+			revoked := createTestRefreshTokenFamily(ctx, t, tx, user.ID, fmt.Sprintf("hash-prune-revoked-%d", i), familyExpiresAt)
+			if err := RevokeRefreshTokenFamily(ctx, tx, revoked.FamilyID, models.RefreshTokenRevokedByLogout, refreshTokenTestTime); err != nil {
+				t.Fatalf("failed to revoke family: %v", err)
+			}
+		}
+		createTestRefreshTokenFamilies(ctx, t, tx, user.ID, "hash-prune-active-with-revoked", 3)
+
+		// When: 3개만 남기도록 정리
+		err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 3, refreshTokenTestTime)
+
+		// Then: 에러 없고, 폐기된 계열과 활성 계열 모두 남음
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		for i := 0; i < 2; i++ {
+			if !refreshTokenExists(ctx, t, tx, fmt.Sprintf("hash-prune-revoked-%d", i)) {
+				t.Errorf("expected revoked family %d to remain", i)
+			}
+		}
+		for i := 0; i < 3; i++ {
+			if !refreshTokenExists(ctx, t, tx, fmt.Sprintf("hash-prune-active-with-revoked-%d", i)) {
+				t.Errorf("expected active family %d to remain", i)
+			}
+		}
+	})
+
+	t.Run("만료된 계열은 상한 계산에서 제외되고 삭제되지 않는다", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 이미 만료된 계열 1개(폐기되지는 않음)와 활성 계열 3개(상한과 같음)
+		user := createRefreshTokenTestUser(ctx, t, tx)
+		createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-prune-expired", refreshTokenTestTime.Add(-time.Hour))
+		createTestRefreshTokenFamilies(ctx, t, tx, user.ID, "hash-prune-active-with-expired", 3)
+
+		// When: 3개만 남기도록 정리
+		err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 3, refreshTokenTestTime)
+
+		// Then: 에러 없고, 만료된 계열과 활성 계열 모두 남음
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if !refreshTokenExists(ctx, t, tx, "hash-prune-expired") {
+			t.Error("expected expired family to remain")
+		}
+		for i := 0; i < 3; i++ {
+			if !refreshTokenExists(ctx, t, tx, fmt.Sprintf("hash-prune-active-with-expired-%d", i)) {
+				t.Errorf("expected active family %d to remain", i)
+			}
+		}
+	})
+
+	t.Run("활성 계열이 상한을 넘으면 가장 오래된 활성 계열만 삭제한다(자식 포함)", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 폐기된 계열, 만료된 계열과, 상한(3)보다 하나 많은 활성 계열 4개
+		// 가장 오래된 활성 계열은 회전되어 토큰이 2개
+		user := createRefreshTokenTestUser(ctx, t, tx)
+		familyExpiresAt := refreshTokenTestTime.Add(time.Hour)
+
+		revoked := createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-prune-mixed-revoked", familyExpiresAt)
+		if err := RevokeRefreshTokenFamily(ctx, tx, revoked.FamilyID, models.RefreshTokenRevokedByLogout, refreshTokenTestTime); err != nil {
+			t.Fatalf("failed to revoke family: %v", err)
+		}
+		createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-prune-mixed-expired", refreshTokenTestTime.Add(-time.Hour))
+
+		oldestActive := createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-prune-mixed-active-0", familyExpiresAt)
+		if _, err := RotateRefreshToken(ctx, tx, oldestActive.ID, []byte("hash-prune-mixed-active-0-child"), familyExpiresAt, refreshTokenTestTime); err != nil {
+			t.Fatalf("failed to rotate oldest active family: %v", err)
+		}
+		for i := 1; i < 4; i++ {
+			createTestRefreshTokenFamily(ctx, t, tx, user.ID, fmt.Sprintf("hash-prune-mixed-active-%d", i), familyExpiresAt)
+		}
+
+		// When: 3개만 남기도록 정리
+		err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 3, refreshTokenTestTime)
+
+		// Then: 에러 없음
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+
+		// Then: 가장 오래된 활성 계열과 그 자식만 삭제됨
+		for _, hash := range []string{"hash-prune-mixed-active-0", "hash-prune-mixed-active-0-child"} {
+			if refreshTokenExists(ctx, t, tx, hash) {
+				t.Errorf("expected %s to be deleted", hash)
+			}
+		}
+
+		// Then: 남은 활성 계열은 그대로
+		for i := 1; i < 4; i++ {
+			hash := fmt.Sprintf("hash-prune-mixed-active-%d", i)
+			if !refreshTokenExists(ctx, t, tx, hash) {
+				t.Errorf("expected %s to remain", hash)
+			}
+		}
+
+		// Then: 폐기·만료된 계열은 이 함수가 건드리지 않음
+		if !refreshTokenExists(ctx, t, tx, "hash-prune-mixed-revoked") {
+			t.Error("expected revoked family to remain")
+		}
+		if !refreshTokenExists(ctx, t, tx, "hash-prune-mixed-expired") {
+			t.Error("expected expired family to remain")
+		}
+	})
+
 	t.Run("상한이 1보다 작으면 에러를 반환한다", func(t *testing.T) {
 		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
 		defer cleanup()
@@ -595,7 +710,7 @@ func TestPruneRefreshTokenFamilies(t *testing.T) {
 		createTestRefreshTokenFamilies(ctx, t, tx, user.ID, "hash-prune-zero", 1)
 
 		// When: 상한 0으로 정리
-		err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 0)
+		err := PruneRefreshTokenFamilies(ctx, tx, user.ID, 0, refreshTokenTestTime)
 
 		// Then: 에러이고 계열은 남음
 		if err == nil {

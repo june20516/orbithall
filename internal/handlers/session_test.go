@@ -186,6 +186,36 @@ func TestIssueSession(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("일부를 로그아웃한 뒤 다시 로그인해도 남은 활성 세션이 상한 이하이면 처음 세션이 유지된다", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 상한(10)만큼 로그인
+		user := createSessionTestUser(ctx, t, tx)
+		cfg := sessionTestConfig()
+		refreshTokens := make([]string, 0, maxSessionsPerUser)
+		for i := 0; i < maxSessionsPerUser; i++ {
+			refreshTokens = append(refreshTokens, mustIssueSession(ctx, t, tx, user, cfg).RefreshToken)
+		}
+
+		// Given: 가장 최근 3개 세션을 로그아웃 (처음 로그인한 세션은 활성으로 남김)
+		for _, refreshToken := range refreshTokens[maxSessionsPerUser-3:] {
+			if err := revokeSession(ctx, tx, refreshToken, sessionTestTime); err != nil {
+				t.Fatalf("failed to revoke session: %v", err)
+			}
+		}
+
+		// When: 3번 더 로그인 (활성 세션은 로그아웃하지 않은 7개 + 새 3개 = 10개로 상한과 같음)
+		for i := 0; i < 3; i++ {
+			mustIssueSession(ctx, t, tx, user, cfg)
+		}
+
+		// Then: 처음 로그인한 세션은 여전히 활성이라 회전할 수 있음
+		if _, err := rotateSession(ctx, tx, refreshTokens[0], cfg, unlimitedRefreshLimiter(), sessionTestTime); err != nil {
+			t.Errorf("expected the first session to still be active and rotate, got: %v", err)
+		}
+	})
 }
 
 // TestRotateSession은 Refresh Token 회전 규칙을 테스트합니다
