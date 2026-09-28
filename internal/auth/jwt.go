@@ -114,17 +114,20 @@ func ValidateJWT(tokenString string) (*CustomClaims, error) {
 	}
 
 	// 토큰 파싱 및 검증
-	// iss와 aud가 없거나 이 서버·어드민 API용 값이 아니면 거부합니다
+	// iss·aud·exp는 필수이며, 값이 없거나 이 서버·어드민 API용이 아니면 거부합니다
+	// 서명 알고리즘은 HS256만 허용합니다
 	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
 		// HMAC 서명 방식인지 확인
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return []byte(jwtSecret), nil
-	}, jwt.WithIssuer(TokenIssuer), jwt.WithAudience(AdminAudience))
+	}, jwt.WithIssuer(TokenIssuer), jwt.WithAudience(AdminAudience),
+		jwt.WithExpirationRequired(), jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 
 	if err != nil {
-		// 만료된 토큰 체크
+		// 서명이 유효하고 만료된 토큰은 다른 클레임 오류(iss·aud·typ 등)와 관계없이
+		// 만료로 응답합니다 (클라이언트가 Refresh Token으로 갱신을 시도하도록)
 		if errors.Is(err, jwt.ErrTokenExpired) {
 			return nil, ErrExpiredToken
 		}

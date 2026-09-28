@@ -164,16 +164,49 @@ func TestValidateJWT(t *testing.T) {
 }
 
 // TestValidateJWT_Expiration은 만료된 토큰 검증을 테스트합니다
-// 주의: 실제 만료된 토큰을 생성하는 것은 시간이 오래 걸리므로
-// 이 테스트는 스킵하거나 mock을 사용해야 합니다
+// 서명이 유효하고 만료된 토큰은 다른 클레임 오류(iss 누락, typ 불일치 등)와
+// 관계없이 항상 ErrExpiredToken을 반환해야 합니다
 func TestValidateJWT_Expiration(t *testing.T) {
-	t.Skip("만료 테스트는 시간이 오래 걸리므로 스킵 (통합 테스트에서 처리)")
+	t.Run("만료된 토큰은 ErrExpiredToken", func(t *testing.T) {
+		// Given: 만료 시각이 과거인 클레임
+		claims := validTestClaims()
+		claims.ExpiresAt = jwt.NewNumericDate(time.Now().Add(-time.Minute))
+		token := signTestClaims(t, claims)
 
-	// 참고: 만료 테스트를 실제로 수행하려면:
-	// 1. JWT_EXPIRATION_HOURS를 매우 작은 값(예: -1)으로 설정
-	// 2. 토큰 생성
-	// 3. time.Sleep()로 대기
-	// 4. 검증 시 ErrExpiredToken 확인
+		// When: 검증
+		_, err := ValidateJWT(token)
+
+		// Then: ErrExpiredToken
+		if err != ErrExpiredToken {
+			t.Errorf("expected ErrExpiredToken, got: %v", err)
+		}
+	})
+
+	tests := []struct {
+		name   string
+		mutate func(claims *CustomClaims)
+	}{
+		{name: "만료 + iss 누락", mutate: func(c *CustomClaims) { c.Issuer = "" }},
+		{name: "만료 + typ 불일치(refresh)", mutate: func(c *CustomClaims) { c.TokenType = "refresh" }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Given: 만료 시각이 과거이면서 다른 필수 클레임도 잘못된 토큰
+			claims := validTestClaims()
+			claims.ExpiresAt = jwt.NewNumericDate(time.Now().Add(-time.Minute))
+			tt.mutate(claims)
+			token := signTestClaims(t, claims)
+
+			// When: 검증
+			_, err := ValidateJWT(token)
+
+			// Then: 다른 클레임 오류와 관계없이 ErrExpiredToken
+			if err != ErrExpiredToken {
+				t.Errorf("expected ErrExpiredToken, got: %v", err)
+			}
+		})
+	}
 }
 
 // TestCustomClaims는 CustomClaims 구조체를 테스트합니다
@@ -260,10 +293,22 @@ func TestGenerateAccessToken(t *testing.T) {
 
 	t.Run("발급할 때마다 jti가 다르다", func(t *testing.T) {
 		// When: 같은 사용자로 두 번 발급
-		first, _, _ := GenerateAccessToken(42, "access@example.com")
-		second, _, _ := GenerateAccessToken(42, "access@example.com")
-		firstClaims, _ := ValidateJWT(first)
-		secondClaims, _ := ValidateJWT(second)
+		first, _, err := GenerateAccessToken(42, "access@example.com")
+		if err != nil {
+			t.Fatalf("failed to generate first token: %v", err)
+		}
+		second, _, err := GenerateAccessToken(42, "access@example.com")
+		if err != nil {
+			t.Fatalf("failed to generate second token: %v", err)
+		}
+		firstClaims, err := ValidateJWT(first)
+		if err != nil {
+			t.Fatalf("failed to validate first token: %v", err)
+		}
+		secondClaims, err := ValidateJWT(second)
+		if err != nil {
+			t.Fatalf("failed to validate second token: %v", err)
+		}
 
 		// Then: jti가 다름
 		if firstClaims.ID == secondClaims.ID {
@@ -314,6 +359,7 @@ func TestValidateJWT_RequiredClaims(t *testing.T) {
 		{name: "iss가 다르면 거부", mutate: func(c *CustomClaims) { c.Issuer = "someone-else" }},
 		{name: "aud가 없으면 거부", mutate: func(c *CustomClaims) { c.Audience = nil }},
 		{name: "aud가 다르면 거부", mutate: func(c *CustomClaims) { c.Audience = jwt.ClaimStrings{"other-service"} }},
+		{name: "exp가 없으면 거부", mutate: func(c *CustomClaims) { c.ExpiresAt = nil }},
 	}
 
 	for _, tt := range tests {
@@ -332,4 +378,24 @@ func TestValidateJWT_RequiredClaims(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidateJWT_RejectsNonHS256Algorithm은 HS256 외 알고리즘으로 서명된
+// 토큰을 거부하는지 테스트합니다
+func TestValidateJWT_RejectsNonHS256Algorithm(t *testing.T) {
+	t.Run("HS512으로 서명된 토큰은 거부", func(t *testing.T) {
+		// Given: 같은 비밀키로 HS512 서명한 유효 클레임 토큰
+		token, err := jwt.NewWithClaims(jwt.SigningMethodHS512, validTestClaims()).SignedString([]byte(os.Getenv("JWT_SECRET")))
+		if err != nil {
+			t.Fatalf("failed to sign test claims: %v", err)
+		}
+
+		// When: 검증
+		_, err = ValidateJWT(token)
+
+		// Then: ErrInvalidToken
+		if err != ErrInvalidToken {
+			t.Errorf("expected ErrInvalidToken, got: %v", err)
+		}
+	})
 }
