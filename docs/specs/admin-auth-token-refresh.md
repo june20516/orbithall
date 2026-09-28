@@ -202,6 +202,7 @@ Content-Type: application/json
 ### 2.4 `/admin/*` 인증 (변경 없음 + 보강)
 - 헤더: `Authorization: Bearer <access_token>`
 - 기존 에러 코드를 유지하되, 본문은 객체 형식(`error.code`)으로 바뀐다: `MISSING_TOKEN`, `INVALID_TOKEN`, `EXPIRED_TOKEN`, `USER_NOT_FOUND`
+- `UNAUTHORIZED`: 미들웨어를 통과했지만 컨텍스트에 사용자가 없을 때 핸들러가 반환하는 방어 코드다(정상 흐름에서는 발생하지 않는다).
 - Access Token에 `typ: "access"`, `iss: "orbithall"`, `aud: "orbithall-admin"`, `jti` 클레임을 추가한다. 백엔드는 `typ`·`iss`·`aud` 중 하나라도 없거나 다르면 `INVALID_TOKEN`으로 거부한다.
   - 이 클레임이 없는 기존 토큰은 배포 즉시 거부된다. 기존 로그인 사용자는 한 번 다시 로그인해야 한다(7장).
   - `exp`도 필수이며, 서명 알고리즘은 HS256만 받는다.

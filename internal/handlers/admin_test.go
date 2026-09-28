@@ -1160,6 +1160,171 @@ func TestGetPostComments(t *testing.T) {
 			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
+
+	t.Run("포스트 댓글 조회 실패 - 존재하지 않는 포스트", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 사용자와 사이트는 있지만 해당 slug의 포스트는 없음
+		user := &models.User{
+			Email:    "test@example.com",
+			Name:     "Test User",
+			GoogleID: "google-test",
+		}
+		database.CreateUser(ctx, tx, user)
+
+		site := &models.Site{
+			Name:        "Test Blog",
+			Domain:      "test.com",
+			CORSOrigins: []string{"https://test.com"},
+			IsActive:    true,
+		}
+		database.CreateSiteForUser(ctx, tx, site, user.ID)
+
+		// When: 존재하지 않는 slug로 댓글 조회
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodGet, "/admin/posts/no-such-post/comments?site_id="+strconv.FormatInt(site.ID, 10), nil)
+		rec := httptest.NewRecorder()
+
+		ctx = context.WithValue(ctx, userContextKey, user)
+		req = req.WithContext(ctx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("slug", "no-such-post")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		handler.GetPostComments(rec, req)
+
+		// Then: 404 Not Found, POST_NOT_FOUND
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusNotFound, rec.Code, rec.Body.String())
+		}
+		if code := readErrorCode(t, rec); code != ErrPostNotFound {
+			t.Errorf("error.code = %q, want %q", code, ErrPostNotFound)
+		}
+	})
+}
+
+// TestAdminHandlers_InvalidSiteID는 사이트 ID(GetPostComments는 site_id 쿼리 파라미터)가
+// 숫자가 아닐 때 각 핸들러가 400 Bad Request, INVALID_INPUT을 반환하는지 검증합니다
+func TestAdminHandlers_InvalidSiteID(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사용자 (ID 파싱이 사이트 소유 여부 확인보다 먼저 실패하므로 사이트 소유는 불필요)
+	user := &models.User{
+		Email:    "invalid-site-id@example.com",
+		Name:     "Invalid Site ID User",
+		GoogleID: "google-invalid-site-id",
+	}
+	if err := database.CreateUser(ctx, tx, user); err != nil {
+		t.Fatalf("Failed to create user: %v", err)
+	}
+
+	handler := NewAdminHandler(tx)
+	const invalidID = "not-a-number"
+
+	tests := []struct {
+		name string
+		call func() *httptest.ResponseRecorder
+	}{
+		{
+			name: "GetSite",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodGet, "/admin/sites/"+invalidID, nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", invalidID)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.GetSite(rec, req)
+				return rec
+			},
+		},
+		{
+			name: "UpdateSite",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodPut, "/admin/sites/"+invalidID, nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", invalidID)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.UpdateSite(rec, req)
+				return rec
+			},
+		},
+		{
+			name: "DeleteSite",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodDelete, "/admin/sites/"+invalidID, nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", invalidID)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.DeleteSite(rec, req)
+				return rec
+			},
+		},
+		{
+			name: "GetSiteStats",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodGet, "/admin/sites/"+invalidID+"/stats", nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", invalidID)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.GetSiteStats(rec, req)
+				return rec
+			},
+		},
+		{
+			name: "ListSitePosts",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodGet, "/admin/sites/"+invalidID+"/posts", nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", invalidID)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.ListSitePosts(rec, req)
+				return rec
+			},
+		},
+		{
+			name: "GetPostComments",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodGet, "/admin/posts/some-post/comments?site_id="+invalidID, nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("slug", "some-post")
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.GetPostComments(rec, req)
+				return rec
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// When: 숫자가 아닌 사이트 ID로 호출
+			rec := tc.call()
+
+			// Then: 400 Bad Request, INVALID_INPUT
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+			}
+			if code := readErrorCode(t, rec); code != ErrInvalidInput {
+				t.Errorf("error.code = %q, want %q", code, ErrInvalidInput)
+			}
+		})
+	}
 }
 
 // adminDeleteFixture는 어드민 댓글 삭제 테스트용 사용자·사이트·포스트입니다

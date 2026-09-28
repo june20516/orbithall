@@ -661,8 +661,13 @@ func (h *AdminHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 
 	// 댓글이 속한 사이트 확인 (댓글은 FK로 포스트에 묶여 있으므로 포스트가 없으면 서버 오류)
 	post, err := database.GetPostByID(r.Context(), h.db, comment.PostID)
-	if err != nil || post == nil {
+	if err != nil {
 		log.Printf("[ERROR] admin DeleteComment: 포스트 조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get post", nil)
+		return
+	}
+	if post == nil {
+		log.Printf("[ERROR] admin DeleteComment: 댓글 %d의 포스트(ID=%d)를 찾을 수 없음 (데이터 정합성 문제)", comment.ID, comment.PostID)
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get post", nil)
 		return
 	}
