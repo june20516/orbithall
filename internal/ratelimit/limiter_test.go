@@ -108,6 +108,23 @@ func setLastSeen(t *testing.T, rl *RateLimiter, key string, at time.Time) {
 	v.(*entry).lastSeen.Store(at.UnixNano())
 }
 
+// waitUntil은 condition이 true가 될 때까지 짧은 간격으로 폴링하고, timeout 안에
+// 만족되지 않으면 msg로 테스트를 실패시킵니다. 고정된 sleep 대신 조건 자체를 기다려
+// 부하가 걸린 환경(CI, -race)에서도 결정적으로 동작합니다
+func waitUntil(t *testing.T, timeout time.Duration, condition func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if condition() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(msg)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // TestCleanupIdle_RemovesOnlyStaleEntries는 idle 시간보다 오래 쓰이지 않은 항목만 지워지는지 테스트합니다
 func TestCleanupIdle_RemovesOnlyStaleEntries(t *testing.T) {
 	// Given: 두 개의 키가 등록된 RateLimiter
@@ -157,32 +174,33 @@ func TestGetLimiter_UpdatesLastSeen(t *testing.T) {
 
 // TestStartCleanup_StopsOnContextCancel은 ctx가 취소되면 정리 고루틴이 종료되는지 테스트합니다
 func TestStartCleanup_StopsOnContextCancel(t *testing.T) {
-	// Given: 짧은 주기로 StartCleanup을 시작한 RateLimiter
+	// Given: 짧은 주기로 정리 고루틴을 시작한 RateLimiter
+	// (패키지 내부의 startCleanupLoop를 직접 호출해 종료 시 닫히는 done 채널을 받습니다.
+	// StartCleanup은 이 함수를 감싸기만 하므로 동작은 동일합니다)
 	rl := NewRateLimiter(rate.Limit(10), 5)
 	rl.GetLimiter("key")
 
 	ctx, cancel := context.WithCancel(context.Background())
-	rl.StartCleanup(ctx, 10*time.Millisecond, 1*time.Millisecond)
+	done := rl.startCleanupLoop(ctx, 10*time.Millisecond, 1*time.Millisecond)
 
-	// When: 정리가 최소 한 번 동작할 시간을 준 뒤 ctx를 취소
+	// When: 정리가 최소 한 번 동작할 때까지 폴링으로 기다린 뒤 ctx를 취소
 	// (idle을 극히 짧게 두어 다음 tick에서 key가 지워지는지로 동작 여부를 확인)
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for {
-		if _, exists := rl.visitors.Load("key"); !exists {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("Expected StartCleanup goroutine to remove idle entry before deadline")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitUntil(t, 500*time.Millisecond, func() bool {
+		_, exists := rl.visitors.Load("key")
+		return !exists
+	}, "Expected StartCleanup goroutine to remove idle entry before deadline")
+
 	cancel()
 
-	// Then: cancel 이후 고루틴이 종료되어 더 이상 정리가 일어나지 않아야 함 (goroutine 누수 없음)
-	// 새 키를 등록하고 한동안 기다려도 삭제되지 않으면 고루틴이 멈춘 것으로 판단
-	time.Sleep(20 * time.Millisecond)
+	// 고루틴이 실제로 종료될 때까지 done 채널을 기다립니다 (sleep으로 추측하지 않음)
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Expected cleanup goroutine to exit after ctx cancel")
+	}
+
+	// Then: 고루틴이 이미 종료되었으므로, 새 키를 등록해도 더 이상 정리가 일어나지 않아야 함
 	rl.GetLimiter("after-cancel")
-	time.Sleep(50 * time.Millisecond)
 	if _, exists := rl.visitors.Load("after-cancel"); !exists {
 		t.Fatal("Expected entry to remain after ctx cancel, but cleanup goroutine still running")
 	}
@@ -194,22 +212,25 @@ func TestConcurrentGetLimiterAndCleanupIdle(t *testing.T) {
 	// Given: RateLimiter
 	rl := NewRateLimiter(rate.Limit(1000), 1000)
 
-	var wg sync.WaitGroup
+	var workers sync.WaitGroup
 
 	// When: 여러 고루틴이 동시에 GetLimiter를 호출하고
 	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
 			for j := 0; j < 50; j++ {
 				rl.GetLimiter("concurrent-key")
 			}
-		}(i)
+		}()
 	}
 
 	// 동시에 다른 고루틴이 CleanupIdle을 반복 호출
 	stop := make(chan struct{})
+	var cleanup sync.WaitGroup
+	cleanup.Add(1)
 	go func() {
+		defer cleanup.Done()
 		for {
 			select {
 			case <-stop:
@@ -220,8 +241,9 @@ func TestConcurrentGetLimiterAndCleanupIdle(t *testing.T) {
 		}
 	}()
 
-	wg.Wait()
+	workers.Wait()
 	close(stop)
+	cleanup.Wait() // 테스트에서 띄운 정리 고루틴이 실제로 종료될 때까지 대기
 
 	// Then: race detector가 아무것도 검출하지 않으면 성공 (go test -race로 확인)
 }

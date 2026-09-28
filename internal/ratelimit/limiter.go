@@ -17,8 +17,8 @@ type entry struct {
 	lastSeen atomic.Int64
 }
 
-// RateLimiter는 IP별 요청 제한을 관리합니다
-// sync.Map을 사용하여 thread-safe하게 IP별 Limiter를 저장합니다
+// RateLimiter는 키(IP 또는 로그인 계열 ID)별 요청 제한을 관리합니다
+// sync.Map을 사용하여 thread-safe하게 키별 Limiter를 저장합니다
 type RateLimiter struct {
 	// visitors는 IP 주소(또는 로그인 계열 ID)를 키로, *entry를 값으로 저장합니다
 	visitors sync.Map
@@ -82,22 +82,33 @@ func (rl *RateLimiter) GetLimiter(key string) *rate.Limiter {
 	return actualEntry.limiter
 }
 
-// CleanupIdle은 now 기준으로 idle보다 오래 사용되지 않은 항목을 삭제하고, 지운 항목 수를 반환합니다
-// now를 인자로 받아 테스트에서 시각을 주입할 수 있게 합니다
+// CleanupIdle은 now 기준으로 idle보다 오래 사용되지 않은 항목을 삭제하고, 실제로 삭제에
+// 성공한 항목 수를 반환합니다. now를 인자로 받아 테스트에서 시각을 주입할 수 있게 합니다
 //
 // idle은 토큰 버킷이 가득 찰 만큼 충분히 길어야 삭제가 제한을 느슨하게 만들지 않습니다:
 // 항목을 지운 뒤 같은 키로 다시 요청이 오면 burst만큼 가득 찬 새 Limiter가 생성되는데,
 // 이는 idle 시간(≥ burst / limit) 동안 토큰이 어차피 가득 재충전되었을 상태와 같습니다.
 // 즉 idle < burst / limit 이면, 아직 토큰이 다 차지 않은 항목을 지우고 새로 만들어
 // 실질적으로 버킷을 리필해주는 셈이 되어 제한이 우회됩니다.
+//
+// Range가 lastSeen을 확인한 시점과 실제 삭제 시점 사이에는 간격이 있어, 그 사이 GetLimiter가
+// 같은 키를 갱신하면 방금 쓰인 항목이 지워질 위험(TOCTOU)이 있습니다. 이를 줄이기 위해 삭제
+// 직전 lastSeen을 한 번 더 확인하고, sync.Map.CompareAndDelete로 Range가 읽었던 entry와
+// 지금 저장된 entry가 같을 때만 지웁니다. 이 CompareAndDelete는 두 CleanupIdle 고루틴이
+// 동시에 같은 키를 정리하다가 그 사이 GetLimiter가 새 entry를 만든 경우, 그 새 entry까지
+// 잘못 지우는 것도 막아줍니다(운영에서는 정리 고루틴이 하나뿐이라 실제로 발생하진 않지만,
+// 비용 없이 방지할 수 있어 반영합니다).
 func (rl *RateLimiter) CleanupIdle(now time.Time, idle time.Duration) int {
 	cutoff := now.Add(-idle).UnixNano()
 	removed := 0
 
 	rl.visitors.Range(func(key, value any) bool {
 		e := value.(*entry)
-		if e.lastSeen.Load() < cutoff {
-			rl.visitors.Delete(key)
+		if e.lastSeen.Load() >= cutoff {
+			return true
+		}
+		// 삭제 직전 재확인 + CompareAndDelete: 그 사이 갱신되었거나 교체된 entry는 지우지 않습니다
+		if e.lastSeen.Load() < cutoff && rl.visitors.CompareAndDelete(key, value) {
 			removed++
 		}
 		return true
@@ -109,7 +120,18 @@ func (rl *RateLimiter) CleanupIdle(now time.Time, idle time.Duration) int {
 // StartCleanup은 interval마다 CleanupIdle(time.Now(), idle)을 호출하는 고루틴을 시작합니다
 // ctx가 취소되면 고루틴이 종료됩니다 (goroutine 누수 방지)
 func (rl *RateLimiter) StartCleanup(ctx context.Context, interval, idle time.Duration) {
+	rl.startCleanupLoop(ctx, interval, idle)
+}
+
+// startCleanupLoop는 StartCleanup의 실제 구현으로, 고루틴이 종료될 때 닫히는 채널을
+// 반환합니다. 테스트가 sleep 대신 이 채널을 기다려 고루틴 종료를 결정적으로 확인할 수
+// 있도록 별도로 분리했습니다
+func (rl *RateLimiter) startCleanupLoop(ctx context.Context, interval, idle time.Duration) <-chan struct{} {
+	done := make(chan struct{})
+
 	go func() {
+		defer close(done)
+
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -122,4 +144,6 @@ func (rl *RateLimiter) StartCleanup(ctx context.Context, interval, idle time.Dur
 			}
 		}
 	}()
+
+	return done
 }
