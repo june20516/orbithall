@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/june20516/orbithall/internal/models"
@@ -75,5 +77,70 @@ func TestGetOrCreateUserByGoogleID_ConcurrentFirstLogin(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("users rows = %d, want 1", count)
+	}
+}
+
+// concurrentGetOrCreateWorkers는 같은 사용자를 동시에 조회·생성하는 goroutine 수입니다
+const concurrentGetOrCreateWorkers = 16
+
+// concurrentGetOrCreateRounds는 새 사용자로 동시 조회·생성을 반복하는 횟수입니다
+// 경합은 확률적으로만 드러나므로 여러 번 반복해 재현 가능성을 높입니다
+const concurrentGetOrCreateRounds = 50
+
+// TestGetOrCreateUserByGoogleID_ConcurrentInsert는 트랜잭션 없이 같은 Google ID·이메일로
+// 여러 요청이 동시에 INSERT를 시도해도 에러 없이 모두 같은 사용자를 받는지 테스트합니다
+// users에는 google_id 외에 email UNIQUE도 있어, 두 제약 모두에서 경합이 에러로 드러나지 않아야 합니다
+func TestGetOrCreateUserByGoogleID_ConcurrentInsert(t *testing.T) {
+	ctx, db, suffix := setupConcurrencyTest(t)
+
+	// Given: 라운드마다 쓰는 고유 Google ID 접두어, 테스트 종료 시 커밋된 사용자를 모두 삭제
+	googleIDPrefix := "google-" + suffix + "-"
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM users WHERE google_id LIKE $1 || '%'`, googleIDPrefix); err != nil {
+			t.Errorf("failed to delete committed test users: %v", err)
+		}
+	})
+
+	for round := 0; round < concurrentGetOrCreateRounds; round++ {
+		// Given: 아직 없는 사용자 정보
+		input := models.User{
+			Email:    fmt.Sprintf("%s-%d@example.com", suffix, round),
+			Name:     "Concurrent Insert User",
+			GoogleID: fmt.Sprintf("%s%d", googleIDPrefix, round),
+		}
+
+		// When: 여러 goroutine이 동시에 같은 사용자를 조회·생성 (시작 신호로 최대한 같은 순간에 출발)
+		start := make(chan struct{})
+		results := make([]getOrCreateUserResult, concurrentGetOrCreateWorkers)
+		var wg sync.WaitGroup
+		for i := range results {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				<-start
+				workerInput := input
+				user, err := GetOrCreateUserByGoogleID(ctx, db, &workerInput)
+				results[i] = getOrCreateUserResult{user: user, err: err}
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+
+		// Then: 모든 요청이 에러 없이 같은 ID의 사용자를 받음
+		var firstID int64
+		for i, result := range results {
+			if result.err != nil {
+				t.Fatalf("round %d worker %d: expected no error, got: %v", round, i, result.err)
+			}
+			if result.user == nil {
+				t.Fatalf("round %d worker %d: expected user, got nil", round, i)
+			}
+			if firstID == 0 {
+				firstID = result.user.ID
+			}
+			if result.user.ID != firstID {
+				t.Fatalf("round %d worker %d: user id = %d, want %d", round, i, result.user.ID, firstID)
+			}
+		}
 	}
 }

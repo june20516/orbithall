@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/june20516/orbithall/internal/models"
@@ -299,7 +300,7 @@ func TestGetUserByID(t *testing.T) {
 }
 
 // TestGetOrCreateUserByGoogleID는 Google ID 기준 사용자 조회·생성을 테스트합니다
-// 이메일 충돌 테스트는 에러로 트랜잭션이 abort되므로 서브테스트마다 독립 트랜잭션을 씁니다
+// 서브테스트끼리 데이터가 섞이지 않도록 서브테스트마다 독립 트랜잭션을 씁니다
 func TestGetOrCreateUserByGoogleID(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
 	defer Close(db)
@@ -387,7 +388,7 @@ func TestGetOrCreateUserByGoogleID(t *testing.T) {
 		}
 	})
 
-	t.Run("다른 Google ID가 같은 이메일을 쓰면 에러를 반환한다", func(t *testing.T) {
+	t.Run("다른 Google ID가 같은 이메일을 쓰면 ErrEmailTaken을 반환한다", func(t *testing.T) {
 		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
 		defer cleanup()
 
@@ -400,9 +401,9 @@ func TestGetOrCreateUserByGoogleID(t *testing.T) {
 		// When: 다른 Google ID로 같은 이메일 사용자 조회·생성
 		user, err := GetOrCreateUserByGoogleID(ctx, tx, &models.User{Email: existing.Email, Name: "Other", GoogleID: "google-get-or-create-other"})
 
-		// Then: 에러 반환
-		if err == nil {
-			t.Fatalf("expected error for duplicate email, got user %+v", user)
+		// Then: 이메일 점유 에러 반환
+		if !errors.Is(err, ErrEmailTaken) {
+			t.Fatalf("expected ErrEmailTaken, got user %+v, err %v", user, err)
 		}
 	})
 }

@@ -113,8 +113,14 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 
 	// 6. Google ID로 사용자 조회, 없으면 생성
 	// 같은 사용자의 첫 로그인이 동시에 들어와도 한쪽이 실패하지 않도록 조회·생성을 한 번에 처리합니다
-	// 다른 Google 계정이 같은 이메일을 이미 쓰고 있으면 이메일 UNIQUE 제약 위반으로 에러가 납니다
+	// 다른 Google 계정이 같은 이메일을 이미 쓰고 있으면 ErrEmailTaken이 반환됩니다
+	// 이 경우도 응답은 일반 서버 에러로 두어 이메일 사용 여부를 드러내지 않고, 원인은 로그로만 남깁니다
 	user, err := database.GetOrCreateUserByGoogleID(r.Context(), tx, newUserFromGoogle(payload, req))
+	if errors.Is(err, database.ErrEmailTaken) {
+		log.Printf("[ERROR] google verify: email conflict with another google account (google_id=%s): %v", payload.GoogleID, err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get or create user", nil)
+		return
+	}
 	if err != nil {
 		log.Printf("[ERROR] google verify: get or create user (google_id=%s): %v", payload.GoogleID, err)
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get or create user", nil)

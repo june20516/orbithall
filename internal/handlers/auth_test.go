@@ -6,9 +6,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -513,6 +515,12 @@ func TestGoogleVerify_EmailTakenByOtherGoogleAccount(t *testing.T) {
 	otherGoogleID, _ := newGoogleVerifyTestIdentity(t, db)
 	handler := newGoogleVerifyTestHandler(db, otherGoogleID, email)
 
+	// Given: 서버 로그를 가로채 확인
+	var logs bytes.Buffer
+	originalOutput := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(originalOutput) })
+
 	// When: 다른 Google 계정으로 첫 로그인
 	rec := callGoogleVerify(t, handler, email)
 
@@ -525,5 +533,16 @@ func TestGoogleVerify_EmailTakenByOtherGoogleAccount(t *testing.T) {
 	}
 	if count := countUsersByGoogleID(t, db, otherGoogleID); count != 0 {
 		t.Errorf("users rows = %d, want 0", count)
+	}
+
+	// Then: 응답에는 이메일 점유 사실이 드러나지 않음
+	if strings.Contains(rec.Body.String(), "email") {
+		t.Errorf("response must not reveal email usage, got: %s", rec.Body.String())
+	}
+
+	// Then: 로그에는 Google ID와 이메일 점유 원인이 남음
+	logged := logs.String()
+	if !strings.Contains(logged, "google_id="+otherGoogleID) || !strings.Contains(logged, database.ErrEmailTaken.Error()) {
+		t.Errorf("log = %q, want google_id and email-taken cause", logged)
 	}
 }
