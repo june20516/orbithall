@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func init() {
@@ -203,4 +205,131 @@ func TestCustomClaims(t *testing.T) {
 			t.Error("expected expiration time to be in the future")
 		}
 	})
+}
+
+// signTestClaims는 테스트용 클레임을 JWT_SECRET으로 서명합니다
+func signTestClaims(t *testing.T, claims *CustomClaims) string {
+	t.Helper()
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(os.Getenv("JWT_SECRET")))
+	if err != nil {
+		t.Fatalf("failed to sign test claims: %v", err)
+	}
+	return token
+}
+
+// TestGenerateAccessToken은 Access Token 발급 시 클레임과 만료 시각을 테스트합니다
+func TestGenerateAccessToken(t *testing.T) {
+	t.Run("Access Token 클레임과 만료 시각을 함께 반환한다", func(t *testing.T) {
+		// Given: 발급 전 시각
+		before := time.Now()
+
+		// When: Access Token 발급
+		token, expiresAt, err := GenerateAccessToken(42, "access@example.com")
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		claims, err := ValidateJWT(token)
+		if err != nil {
+			t.Fatalf("failed to validate token: %v", err)
+		}
+
+		// Then: typ/iss/aud/jti 클레임이 있고 exp가 반환값과 같음
+		if claims.TokenType != AccessTokenType {
+			t.Errorf("typ = %q, want %q", claims.TokenType, AccessTokenType)
+		}
+		if claims.Issuer != TokenIssuer {
+			t.Errorf("iss = %q, want %q", claims.Issuer, TokenIssuer)
+		}
+		if len(claims.Audience) != 1 || claims.Audience[0] != AdminAudience {
+			t.Errorf("aud = %v, want [%q]", claims.Audience, AdminAudience)
+		}
+		if claims.ID == "" {
+			t.Error("expected non-empty jti")
+		}
+		if !claims.ExpiresAt.Time.Equal(expiresAt) {
+			t.Errorf("exp = %v, returned expiresAt = %v", claims.ExpiresAt.Time, expiresAt)
+		}
+
+		// Then: 만료 시각은 발급 시각 + JWT_EXPIRATION_HOURS(테스트 init에서 168)
+		earliest := before.Add(168 * time.Hour).Add(-time.Second)
+		latest := time.Now().Add(168 * time.Hour)
+		if expiresAt.Before(earliest) || expiresAt.After(latest) {
+			t.Errorf("expiresAt %v not within [%v, %v]", expiresAt, earliest, latest)
+		}
+	})
+
+	t.Run("발급할 때마다 jti가 다르다", func(t *testing.T) {
+		// When: 같은 사용자로 두 번 발급
+		first, _, _ := GenerateAccessToken(42, "access@example.com")
+		second, _, _ := GenerateAccessToken(42, "access@example.com")
+		firstClaims, _ := ValidateJWT(first)
+		secondClaims, _ := ValidateJWT(second)
+
+		// Then: jti가 다름
+		if firstClaims.ID == secondClaims.ID {
+			t.Error("expected different jti values")
+		}
+	})
+}
+
+// validTestClaims는 필수 클레임을 모두 갖춘 Access Token 클레임입니다
+func validTestClaims() *CustomClaims {
+	return &CustomClaims{
+		UserID:    7,
+		Email:     "claims@example.com",
+		TokenType: AccessTokenType,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    TokenIssuer,
+			Audience:  jwt.ClaimStrings{AdminAudience},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	}
+}
+
+// TestValidateJWT_RequiredClaims는 typ·iss·aud 필수 검증을 테스트합니다
+func TestValidateJWT_RequiredClaims(t *testing.T) {
+	t.Run("필수 클레임이 모두 맞으면 통과한다", func(t *testing.T) {
+		// Given: 올바른 클레임
+		token := signTestClaims(t, validTestClaims())
+
+		// When: 검증
+		claims, err := ValidateJWT(token)
+
+		// Then: 통과
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if claims.UserID != 7 {
+			t.Errorf("UserID = %d, want 7", claims.UserID)
+		}
+	})
+
+	tests := []struct {
+		name   string
+		mutate func(claims *CustomClaims)
+	}{
+		{name: "typ가 없으면 거부", mutate: func(c *CustomClaims) { c.TokenType = "" }},
+		{name: "typ가 access가 아니면 거부", mutate: func(c *CustomClaims) { c.TokenType = "refresh" }},
+		{name: "iss가 없으면 거부", mutate: func(c *CustomClaims) { c.Issuer = "" }},
+		{name: "iss가 다르면 거부", mutate: func(c *CustomClaims) { c.Issuer = "someone-else" }},
+		{name: "aud가 없으면 거부", mutate: func(c *CustomClaims) { c.Audience = nil }},
+		{name: "aud가 다르면 거부", mutate: func(c *CustomClaims) { c.Audience = jwt.ClaimStrings{"other-service"} }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Given: 필수 클레임 하나가 잘못된 토큰
+			claims := validTestClaims()
+			tt.mutate(claims)
+			token := signTestClaims(t, claims)
+
+			// When: 검증
+			_, err := ValidateJWT(token)
+
+			// Then: ErrInvalidToken
+			if err != ErrInvalidToken {
+				t.Errorf("expected ErrInvalidToken, got: %v", err)
+			}
+		})
+	}
 }
