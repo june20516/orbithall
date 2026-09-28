@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"time"
@@ -28,6 +29,9 @@ const (
 
 	// AdminAudience는 토큰을 받는 대상(어드민 API)을 나타내는 aud 클레임 값입니다
 	AdminAudience = "orbithall-admin"
+
+	// defaultAccessTokenExpirationHours는 JWT_EXPIRATION_HOURS가 없거나 잘못되었을 때 쓰는 Access Token 수명(7일)입니다
+	defaultAccessTokenExpirationHours = 168
 )
 
 // CustomClaims는 JWT 토큰에 포함될 사용자 정의 클레임입니다
@@ -51,22 +55,12 @@ func GenerateJWT(userID int64, email string) (string, error) {
 // GenerateAccessToken은 사용자 ID와 이메일을 담은 Access Token과 그 만료 시각을 반환합니다
 // JWT_SECRET과 JWT_EXPIRATION_HOURS 환경변수를 사용합니다
 func GenerateAccessToken(userID int64, email string) (string, time.Time, error) {
-	// JWT_SECRET 검증
+	if err := ValidateJWTSecret(); err != nil {
+		return "", time.Time{}, err
+	}
 	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		return "", time.Time{}, fmt.Errorf("JWT_SECRET environment variable is required")
-	}
-	if len(jwtSecret) < 32 {
-		return "", time.Time{}, fmt.Errorf("JWT_SECRET must be at least 32 characters long")
-	}
 
-	// JWT_EXPIRATION_HOURS 읽기 (기본값: 168시간 = 7일)
-	expirationHours := 168
-	if expirationStr := os.Getenv("JWT_EXPIRATION_HOURS"); expirationStr != "" {
-		if parsed, err := strconv.Atoi(expirationStr); err == nil {
-			expirationHours = parsed
-		}
-	}
+	expirationHours := accessTokenExpirationHours()
 
 	// 만료 시간 계산
 	// JWT의 exp는 초 단위로 저장되므로 반환값도 초 단위로 맞춥니다
@@ -98,6 +92,36 @@ func GenerateAccessToken(userID int64, email string) (string, time.Time, error) 
 	}
 
 	return tokenString, expiresAt, nil
+}
+
+// ValidateJWTSecret은 JWT_SECRET 환경변수가 비어 있지 않고 32자 이상인지 확인합니다
+// 서버 시작 시 호출해 설정 누락을 조기에 발견합니다
+func ValidateJWTSecret() error {
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		return fmt.Errorf("JWT_SECRET environment variable is required")
+	}
+	if len(jwtSecret) < 32 {
+		return fmt.Errorf("JWT_SECRET must be at least 32 characters long")
+	}
+	return nil
+}
+
+// accessTokenExpirationHours는 JWT_EXPIRATION_HOURS 환경변수에서 Access Token 수명(시간)을 읽습니다
+// 없으면 기본값을 쓰고, 값이 있는데 정수가 아니거나 0 이하이면 경고를 남기고 기본값을 씁니다
+func accessTokenExpirationHours() int {
+	value := os.Getenv("JWT_EXPIRATION_HOURS")
+	if value == "" {
+		return defaultAccessTokenExpirationHours
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		log.Printf("[WARN] JWT_EXPIRATION_HOURS=%q is invalid, using default %d", value, defaultAccessTokenExpirationHours)
+		return defaultAccessTokenExpirationHours
+	}
+
+	return parsed
 }
 
 // ValidateJWT는 JWT 토큰을 검증하고 claims를 반환합니다

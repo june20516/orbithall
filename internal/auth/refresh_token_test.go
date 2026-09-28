@@ -5,6 +5,8 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
+	"log"
 	"strings"
 	"testing"
 	"time"
@@ -251,6 +253,57 @@ func TestLoadRefreshTokenConfig(t *testing.T) {
 		// Then: 기본값
 		if cfg.IdleTTL != 14*24*time.Hour || cfg.AbsoluteTTL != 30*24*time.Hour || cfg.ReuseGrace != 30*time.Second {
 			t.Errorf("expected defaults, got: %+v", cfg)
+		}
+	})
+}
+
+// captureLog는 테스트 동안 표준 logger 출력을 버퍼로 받고, 끝나면 원래 출력으로 되돌립니다
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	original := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(original) })
+	return &buf
+}
+
+// TestDurationFromEnv_Warning은 잘못된 값으로 기본값을 쓸 때만 경고를 남기는지 테스트합니다
+func TestDurationFromEnv_Warning(t *testing.T) {
+	const key = "REFRESH_TOKEN_IDLE_TTL"
+
+	t.Run("형식이 잘못되었거나 0 이하이면 경고를 남긴다", func(t *testing.T) {
+		for _, value := range []string{"two weeks", "-1h", "0s"} {
+			// Given: 잘못된 값과 로그 버퍼
+			t.Setenv(key, value)
+			buf := captureLog(t)
+
+			// When: 읽기
+			got := durationFromEnv(key, time.Hour)
+
+			// Then: 기본값과 경고
+			if got != time.Hour {
+				t.Errorf("value %q: got %v, want fallback", value, got)
+			}
+			want := fmt.Sprintf("[WARN] %s=%q is invalid, using default 1h0m0s", key, value)
+			if !strings.Contains(buf.String(), want) {
+				t.Errorf("value %q: log = %q, want to contain %q", value, buf.String(), want)
+			}
+		}
+	})
+
+	t.Run("정상 값이나 빈 값이면 경고를 남기지 않는다", func(t *testing.T) {
+		for _, value := range []string{"48h", ""} {
+			// Given: 정상 값 또는 빈 값과 로그 버퍼
+			t.Setenv(key, value)
+			buf := captureLog(t)
+
+			// When: 읽기
+			durationFromEnv(key, time.Hour)
+
+			// Then: 로그 없음
+			if buf.Len() != 0 {
+				t.Errorf("value %q: unexpected log %q", value, buf.String())
+			}
 		}
 	})
 }

@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -396,6 +398,105 @@ func TestValidateJWT_RejectsNonHS256Algorithm(t *testing.T) {
 		// Then: ErrInvalidToken
 		if err != ErrInvalidToken {
 			t.Errorf("expected ErrInvalidToken, got: %v", err)
+		}
+	})
+}
+
+// TestValidateJWTSecret은 JWT_SECRET 검증을 테스트합니다
+func TestValidateJWTSecret(t *testing.T) {
+	tests := []struct {
+		name    string
+		secret  string
+		wantErr string
+	}{
+		{name: "비어 있으면 에러", secret: "", wantErr: "JWT_SECRET environment variable is required"},
+		{name: "32자 미만이면 에러", secret: strings.Repeat("a", 31), wantErr: "JWT_SECRET must be at least 32 characters long"},
+		{name: "32자 이상이면 통과", secret: strings.Repeat("a", 32)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Given: JWT_SECRET 설정
+			t.Setenv("JWT_SECRET", tt.secret)
+
+			// When: 검증
+			err := ValidateJWTSecret()
+
+			// Then: 기대한 결과
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Errorf("error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	t.Run("GenerateAccessToken도 같은 검증을 쓴다", func(t *testing.T) {
+		// Given: 짧은 JWT_SECRET
+		t.Setenv("JWT_SECRET", "short")
+
+		// When: 발급
+		_, _, err := GenerateAccessToken(1, "short@example.com")
+
+		// Then: 같은 에러
+		if err == nil || err.Error() != "JWT_SECRET must be at least 32 characters long" {
+			t.Errorf("error = %v", err)
+		}
+	})
+}
+
+// TestGenerateAccessToken_ExpirationHours는 JWT_EXPIRATION_HOURS 처리를 테스트합니다
+func TestGenerateAccessToken_ExpirationHours(t *testing.T) {
+	t.Run("0 이하이거나 정수가 아니면 경고 후 기본값 168시간", func(t *testing.T) {
+		for _, value := range []string{"0", "-5", "abc"} {
+			// Given: 잘못된 값과 로그 버퍼
+			t.Setenv("JWT_EXPIRATION_HOURS", value)
+			buf := captureLog(t)
+			before := time.Now()
+
+			// When: 발급
+			_, expiresAt, err := GenerateAccessToken(1, "exp@example.com")
+			if err != nil {
+				t.Fatalf("value %q: unexpected error: %v", value, err)
+			}
+
+			// Then: 만료 시각이 발급 시각 + 168시간이고 경고가 남음
+			earliest := before.Add(168 * time.Hour).Add(-time.Second)
+			latest := time.Now().Add(168 * time.Hour)
+			if expiresAt.Before(earliest) || expiresAt.After(latest) {
+				t.Errorf("value %q: expiresAt %v not within [%v, %v]", value, expiresAt, earliest, latest)
+			}
+			want := fmt.Sprintf("[WARN] JWT_EXPIRATION_HOURS=%q is invalid, using default 168", value)
+			if !strings.Contains(buf.String(), want) {
+				t.Errorf("value %q: log = %q, want to contain %q", value, buf.String(), want)
+			}
+		}
+	})
+
+	t.Run("양수이면 그 값을 쓰고 경고하지 않는다", func(t *testing.T) {
+		// Given: 2시간과 로그 버퍼
+		t.Setenv("JWT_EXPIRATION_HOURS", "2")
+		buf := captureLog(t)
+		before := time.Now()
+
+		// When: 발급
+		_, expiresAt, err := GenerateAccessToken(1, "exp@example.com")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Then: 만료 시각이 발급 시각 + 2시간이고 로그 없음
+		earliest := before.Add(2 * time.Hour).Add(-time.Second)
+		latest := time.Now().Add(2 * time.Hour)
+		if expiresAt.Before(earliest) || expiresAt.After(latest) {
+			t.Errorf("expiresAt %v not within [%v, %v]", expiresAt, earliest, latest)
+		}
+		if buf.Len() != 0 {
+			t.Errorf("unexpected log %q", buf.String())
 		}
 	})
 }

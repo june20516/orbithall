@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"time"
 )
@@ -48,6 +49,7 @@ func LoadRefreshTokenConfig() RefreshTokenConfig {
 }
 
 // durationFromEnv는 환경변수를 time.Duration으로 읽고, 없거나 0 이하이거나 형식이 틀리면 fallback을 반환합니다
+// 값이 있는데 쓸 수 없으면 설정 실수를 알 수 있도록 경고를 남깁니다
 func durationFromEnv(key string, fallback time.Duration) time.Duration {
 	value := os.Getenv(key)
 	if value == "" {
@@ -56,6 +58,7 @@ func durationFromEnv(key string, fallback time.Duration) time.Duration {
 
 	parsed, err := time.ParseDuration(value)
 	if err != nil || parsed <= 0 {
+		log.Printf("[WARN] %s=%q is invalid, using default %s", key, value, fallback)
 		return fallback
 	}
 

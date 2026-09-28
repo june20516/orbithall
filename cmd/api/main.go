@@ -74,8 +74,11 @@ func run() error {
 	// ============================================
 	// 인증 설정 검증
 	// ============================================
-	// Refresh Token 회전에 쓰는 비밀키가 없으면 로그인 후 토큰 갱신이 모두 실패하므로 시작 단계에서 막습니다
+	// Access Token 서명 키나 Refresh Token 회전에 쓰는 비밀키가 없으면 로그인과 토큰 갱신이 모두 실패하므로 시작 단계에서 막습니다
 	// 설정 오류가 DB 연결 실패에 가려지지 않도록 DB 연결보다 먼저 검증합니다
+	if err := auth.ValidateJWTSecret(); err != nil {
+		return err
+	}
 	if err := auth.ValidateRefreshTokenSecret(); err != nil {
 		return err
 	}
