@@ -199,6 +199,8 @@ Content-Type: application/json
 - 기존 에러 코드를 유지하되, 본문은 객체 형식(`error.code`)으로 바뀐다: `MISSING_TOKEN`, `INVALID_TOKEN`, `EXPIRED_TOKEN`, `USER_NOT_FOUND`
 - Access Token에 `typ: "access"`, `iss: "orbithall"`, `aud: "orbithall-admin"`, `jti` 클레임을 추가한다. 백엔드는 `typ`·`iss`·`aud` 중 하나라도 없거나 다르면 `INVALID_TOKEN`으로 거부한다.
   - 이 클레임이 없는 기존 토큰은 1단계 배포 즉시 거부된다. 기존 로그인 사용자는 한 번 다시 로그인해야 한다(7장).
+  - `exp`도 필수이며, 서명 알고리즘은 HS256만 받는다.
+  - 서명이 유효하고 만료된 토큰은 다른 클레임 오류와 관계없이 `EXPIRED_TOKEN`으로 응답한다. 클라이언트의 갱신 가능 여부는 Refresh Token으로만 판단되므로, 만료를 먼저 알려 갱신을 시도하게 한다.
 
 ---
 
