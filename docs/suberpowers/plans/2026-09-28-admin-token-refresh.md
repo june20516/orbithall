@@ -2712,6 +2712,9 @@ func TestSessionHandler_Refresh(t *testing.T) {
 		if pair.RefreshToken == login.RefreshToken {
 			t.Error("expected a new refresh token")
 		}
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("Cache-Control = %q, want no-store", got)
+		}
 	})
 
 	t.Run("refresh_token이 없으면 400 INVALID_INPUT", func(t *testing.T) {
@@ -2969,6 +2972,8 @@ func (h *SessionHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 토큰이 담긴 응답은 어디에도 캐시되지 않게 합니다 (RFC 6749 5.1)
+	w.Header().Set("Cache-Control", "no-store")
 	respondJSON(w, http.StatusOK, pair)
 }
 
