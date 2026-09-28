@@ -159,6 +159,7 @@ Content-Type: application/json
 }
 ```
 
+- 응답에는 `Cache-Control: no-store` 헤더가 붙는다(로그인 응답도 동일). 클라이언트도 이 응답을 캐시하거나 로그에 남기지 않는다.
 - 클라이언트는 응답의 `refresh_token`으로 기존 값을 **항상 교체**해 저장한다.
 - 보통은 새 값이다. 다만 유예 시간 안에 같은 토큰으로 다시 요청하면, 앞서 발급한 값과 **같은** `refresh_token`을 돌려준다(3.2). `access_token`은 매번 새로 발급한다.
 
@@ -333,23 +334,25 @@ Next: 토큰 삭제 → /login 리다이렉트
 ## 6. 데이터 모델 (백엔드 내부, 참고용)
 
 ```sql
+-- migrations/006_create_refresh_tokens_table.up.sql 과 동일
 CREATE TABLE refresh_tokens (
-    id                 BIGSERIAL PRIMARY KEY,
+    id                 BIGSERIAL   PRIMARY KEY,
     user_id            BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     family_id          UUID        NOT NULL,              -- 최초 로그인 1회 = 1 family
     parent_id          BIGINT      REFERENCES refresh_tokens(id) ON DELETE CASCADE, -- 이 토큰을 회전해 만든 이전 토큰
     token_hash         BYTEA       NOT NULL UNIQUE,       -- SHA-256(refresh_token)
-    expires_at         TIMESTAMPTZ NOT NULL,              -- 유휴 만료 (발급 + 14일)
+    expires_at         TIMESTAMPTZ NOT NULL,              -- 유휴 만료 (발급 + 14일, 절대 만료를 넘지 않음)
     family_expires_at  TIMESTAMPTZ NOT NULL,              -- 절대 만료 (최초 로그인 + 30일)
     used_at            TIMESTAMPTZ,                       -- 회전에 사용된 시각
     revoked_at         TIMESTAMPTZ,
-    revoked_reason     TEXT,                              -- logout | reuse_detected (사용자 삭제 시에는 행이 CASCADE로 삭제됨)
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    revoked_reason     VARCHAR(30),                       -- logout | reuse_detected (사용자 삭제 시에는 행이 CASCADE로 삭제됨)
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_refresh_tokens_expiry CHECK (expires_at <= family_expires_at)
 );
-CREATE INDEX idx_refresh_tokens_family ON refresh_tokens(family_id);
-CREATE INDEX idx_refresh_tokens_user   ON refresh_tokens(user_id);
+CREATE INDEX idx_refresh_tokens_family_id ON refresh_tokens(family_id);
+CREATE INDEX idx_refresh_tokens_user_id   ON refresh_tokens(user_id);
 -- 부모 하나에 자식은 하나뿐이다 (계열이 갈라지지 않음을 DB가 보장)
-CREATE UNIQUE INDEX idx_refresh_tokens_parent ON refresh_tokens(parent_id) WHERE parent_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_refresh_tokens_parent_id ON refresh_tokens(parent_id) WHERE parent_id IS NOT NULL;
 ```
 
 ### 환경변수

@@ -5,6 +5,8 @@
 
 ## 우선순위
 - [x] 높음
+- [ ] 보통
+- [ ] 낮음
 
 ## 작업 개요
 orbithall-admin이 `access_token`을 읽도록 바뀐 뒤, 로그인 응답의 호환용 `token` 필드를 제거한다. 명세 `docs/specs/admin-auth-token-refresh.md` 7장 3단계다.
