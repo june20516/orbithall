@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
+	"github.com/june20516/orbithall/internal/auth"
 	"github.com/june20516/orbithall/internal/database"
 	"github.com/june20516/orbithall/internal/handlers"
 	"github.com/june20516/orbithall/internal/ratelimit"
@@ -18,6 +20,14 @@ import (
 	"golang.org/x/time/rate"
 
 	_ "github.com/june20516/orbithall/docs" // swagger docs
+)
+
+// 댓글 작성 rate limiter 정리 주기와 idle 기준
+// 분당 10회·burst 5이면 토큰 버킷이 가득 차는 데 최대 30초가 걸리므로,
+// 세션 핸들러의 토큰 갱신 limiter와 같은 주기(10분)·idle(30분)이면 충분히 여유가 있습니다
+const (
+	commentLimiterCleanupInterval = 10 * time.Minute
+	commentLimiterCleanupIdle     = 30 * time.Minute
 )
 
 // @title           Orbithall API
@@ -70,6 +80,18 @@ func run() error {
 		return fmt.Errorf("DATABASE_URL environment variable is required")
 	}
 
+	// ============================================
+	// 인증 설정 검증
+	// ============================================
+	// Access Token 서명 키나 Refresh Token 회전에 쓰는 비밀키가 없으면 로그인과 토큰 갱신이 모두 실패하므로 시작 단계에서 막습니다
+	// 설정 오류가 DB 연결 실패에 가려지지 않도록 DB 연결보다 먼저 검증합니다
+	if err := auth.ValidateJWTSecret(); err != nil {
+		return err
+	}
+	if err := auth.ValidateRefreshTokenSecret(); err != nil {
+		return err
+	}
+
 	db, err := database.New(databaseURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
@@ -84,6 +106,7 @@ func run() error {
 	commentHandler := handlers.NewCommentHandler(db)
 	authHandler := handlers.NewAuthHandler(db)
 	adminHandler := handlers.NewAdminHandler(db)
+	sessionHandler := handlers.NewSessionHandler(db)
 
 	// ============================================
 	// Rate Limiter 초기화
@@ -91,6 +114,11 @@ func run() error {
 	// 댓글 작성 제한: 10 req/min, burst 5
 	// rate.Every()를 사용하여 분당 10개 = 6초당 1개로 설정
 	createCommentLimiter := ratelimit.NewRateLimiter(rate.Every(time.Minute/10), 5)
+
+	// 오래 쓰이지 않은 IP·계열 키를 주기적으로 정리해 메모리가 계속 늘어나지 않게 합니다
+	// (서버 종료 시까지 동작하면 되므로 context.Background() 사용)
+	createCommentLimiter.StartCleanup(context.Background(), commentLimiterCleanupInterval, commentLimiterCleanupIdle)
+	sessionHandler.StartRateLimiterCleanup(context.Background())
 
 	// ============================================
 	// 라우터 설정
@@ -144,7 +172,7 @@ func run() error {
 	// 데이터베이스 헬스체크 엔드포인트 (DB 연결 상태 확인용)
 	r.Get("/health/db", func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-    
+
 		var result int
 		err := db.QueryRowContext(ctx, "SELECT 1").Scan(&result)
 
@@ -164,8 +192,12 @@ func run() error {
 
 	// Auth 라우트 그룹 (/auth 접두사, 인증 불필요)
 	r.Route("/auth", func(r chi.Router) {
-		// Google OAuth 검증 및 JWT 발급
+		// Google OAuth 검증 및 토큰 발급
 		r.Post("/google/verify", authHandler.GoogleVerify)
+		// Refresh Token으로 토큰 쌍 재발급 (계열당 분당 10회 제한)
+		r.Post("/refresh", sessionHandler.Refresh)
+		// Refresh Token이 속한 세션 폐기
+		r.Post("/logout", sessionHandler.Logout)
 	})
 
 	// API 라우트 그룹 (/api 접두사)

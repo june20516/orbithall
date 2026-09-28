@@ -152,12 +152,17 @@ Headers: X-Orbithall-API-Key
 
 #### 인증
 
+로그인하면 Access Token(7일)과 Refresh Token(유휴 14일, 최대 30일)을 발급합니다. 상세 규칙은 `docs/specs/admin-auth-token-refresh.md`를 참고하세요.
+
+Access Token은 `typ`·`iss`·`aud`·`exp` 클레임이 필수입니다. 이 클레임이 없던 버전에서 발급된 토큰은 거부되므로, 배포 직후 기존 로그인 사용자는 다시 로그인해야 합니다.
+
 ```
-POST /auth/google/verify
-Content-Type: application/json
+POST /auth/google/verify   # Google ID Token 검증 후 토큰 쌍 발급
+POST /auth/refresh         # Refresh Token 회전, 새 토큰 쌍 발급
+POST /auth/logout          # Refresh Token이 속한 세션 폐기 (204)
 ```
 
-요청 예시:
+로그인 요청 예시:
 ```json
 {
   "id_token": "Google OAuth ID Token",
@@ -165,6 +170,22 @@ Content-Type: application/json
   "name": "사용자 이름"
 }
 ```
+`id_token`만 필수이며, `email`·`name`·`picture`는 선택입니다. `email`은 사용하지 않고 항상 ID Token의 검증된 이메일을 저장하며, `name`·`picture`는 ID Token에 없을 때만 사용합니다.
+
+이메일이 검증되지 않은 Google 계정은 401 `INVALID_ID_TOKEN`으로 로그인이 거부됩니다(이전 버전에서는 로그인할 수 있었으므로 배포 시 행동 변경입니다).
+
+로그인·갱신 응답의 토큰 필드:
+```json
+{
+  "token_type": "Bearer",
+  "access_token": "eyJ...",
+  "access_token_expires_at": "2026-10-08T12:00:00Z",
+  "refresh_token": "ohrt_...",
+  "refresh_token_expires_at": "2026-10-15T12:00:00Z"
+}
+```
+
+갱신·로그아웃 요청 본문은 `{"refresh_token": "ohrt_..."}`입니다. 인증 에러는 `{"error": {"code": "EXPIRED_TOKEN", "message": "..."}}` 형식이며, `/admin/*` 핸들러 본문의 에러도 같은 객체 형식입니다.
 
 #### 사이트 관리
 
@@ -186,21 +207,28 @@ GET /admin/profile          # 내 프로필 조회
 
 ## 환경변수
 
-| 변수명         | 설명                          | 기본값                       |
-| -------------- | ----------------------------- | ---------------------------- |
-| `PORT`         | API 서버 포트                 | `8080`                       |
-| `DATABASE_URL` | PostgreSQL 연결 문자열        | docker-compose에서 자동 설정 |
-| `ENV`          | 환경 (development/production) | `development`                |
+| 변수명                          | 설명                                             | 기본값                    |
+| ---------------------------- | ---------------------------------------------- | ---------------------- |
+| `PORT`                       | API 서버 포트                                      | `8080`                 |
+| `DATABASE_URL`               | PostgreSQL 연결 문자열                              | docker-compose에서 자동 설정 |
+| `ENV`                        | 환경 (development/production)                    | `development`          |
+| `JWT_SECRET`                 | Access Token 서명 키 (32자 이상)                     | (필수)                   |
+| `JWT_EXPIRATION_HOURS`       | Access Token 수명(시간)                            | `168`                  |
+| `REFRESH_TOKEN_SECRET`       | 후속 Refresh Token 파생 키 (32자 이상, JWT_SECRET과 다름) | (필수)                   |
+| `REFRESH_TOKEN_IDLE_TTL`     | Refresh Token 유휴 만료                            | `336h`                 |
+| `REFRESH_TOKEN_ABSOLUTE_TTL` | 세션 절대 만료                                       | `720h`                 |
+| `REFRESH_TOKEN_REUSE_GRACE`  | 사용된 Refresh Token 재제출 유예 시간                    | `30s`                  |
 
 **참고**: CORS는 사이트별 동적 검증 방식을 사용합니다. 각 사이트의 `cors_origins` 배열로 관리됩니다.
 
 ## Rate Limiting
 
-API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
+API 남용 방지를 위해 요청 제한이 적용됩니다. 댓글 API는 IP 기준, 어드민 토큰 갱신은 로그인 세션 기준입니다.
 
 ### 제한 정책
 
 - **댓글 작성**: 10회/분 (burst: 5)
+- **어드민 토큰 갱신**: 로그인 세션(계열)당 10회/분 (burst: 10), IP 기준 아님
 - **댓글 조회**: 제한 없음
 - **댓글 수정/삭제**: 제한 없음 (30분 시간 제한으로 충분)
 
@@ -214,11 +242,14 @@ API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
     "message": "Too many requests. Please try again later."
   }
   ```
+- **어드민 토큰 갱신**은 다른 인증 에러와 같은 형식으로 응답합니다: `{"error": {"code": "RATE_LIMIT_EXCEEDED", "message": "..."}}`
 - **Retry-After 헤더**: 재시도 대기 시간 (초 단위)
+
+limiter 상태는 서버 메모리에 있으며 30분 이상 쓰이지 않은 키는 10분마다 주기적으로 정리됩니다. 인스턴스를 여러 개로 늘리면 제한이 인스턴스별로 적용됩니다(현재 단일 인스턴스 운영).
 
 ### IP 추출 방식
 
-프록시 환경을 고려하여 다음 순서로 IP를 확인합니다:
+댓글 API의 IP 기준 제한은 프록시 환경을 고려하여 다음 순서로 IP를 확인합니다:
 
 1. `X-Forwarded-For` 헤더 (첫 번째 IP)
 2. `X-Real-IP` 헤더

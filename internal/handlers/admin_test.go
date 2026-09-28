@@ -208,9 +208,12 @@ func TestGetSite(t *testing.T) {
 
 		handler.GetSite(rec, req)
 
-		// Then: 404 Not Found
+		// Then: 404 Not Found, SITE_NOT_FOUND
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrSiteNotFound {
+			t.Errorf("error.code = %q, want %q", code, ErrSiteNotFound)
 		}
 	})
 
@@ -238,9 +241,12 @@ func TestGetSite(t *testing.T) {
 
 		handler.GetSite(rec, req)
 
-		// Then: 404 Not Found
+		// Then: 404 Not Found, SITE_NOT_FOUND
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrSiteNotFound {
+			t.Errorf("error.code = %q, want %q", code, ErrSiteNotFound)
 		}
 	})
 }
@@ -320,11 +326,36 @@ func TestCreateSite(t *testing.T) {
 
 		handler.CreateSite(rec, req)
 
-		// Then: 400 Bad Request
+		// Then: 400 Bad Request, INVALID_INPUT이고 details에 name 검증 메시지
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
 		}
+		assertValidationFailed(t, rec, "name")
 	})
+}
+
+// assertValidationFailed는 응답이 INVALID_INPUT 검증 실패 에러이고 details에 field의 검증 메시지가 있는지 확인합니다
+func assertValidationFailed(t *testing.T, rec *httptest.ResponseRecorder, field string) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code    string            `json:"code"`
+			Message string            `json:"message"`
+			Details map[string]string `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("error body is not in object format: %v, body: %s", err, rec.Body.String())
+	}
+	if body.Error.Code != ErrInvalidInput {
+		t.Errorf("error.code = %q, want %q", body.Error.Code, ErrInvalidInput)
+	}
+	if body.Error.Message != "Validation failed" {
+		t.Errorf("error.message = %q, want %q", body.Error.Message, "Validation failed")
+	}
+	if body.Error.Details[field] == "" {
+		t.Errorf("error.details = %v, want a message for %q", body.Error.Details, field)
+	}
 }
 
 // TestUpdateSite는 사이트 수정 기능을 테스트합니다
@@ -432,10 +463,59 @@ func TestUpdateSite(t *testing.T) {
 
 		handler.UpdateSite(rec, req)
 
-		// Then: 403 Forbidden
+		// Then: 403 Forbidden, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
 		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
+		}
+	})
+
+	t.Run("사이트 수정 실패 - 검증 실패", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 사용자와 사이트
+		user := &models.User{
+			Email:    "invalid-updater@example.com",
+			Name:     "Invalid Updater",
+			GoogleID: "google-invalid-updater",
+		}
+		database.CreateUser(ctx, tx, user)
+
+		site := &models.Site{
+			Name:        "Validation Site",
+			Domain:      "validation.com",
+			CORSOrigins: []string{"https://validation.com"},
+			IsActive:    true,
+		}
+		database.CreateSiteForUser(ctx, tx, site, user.ID)
+
+		// When: 빈 이름으로 수정 시도
+		requestBody := map[string]interface{}{
+			"name": "   ",
+		}
+		bodyBytes, _ := json.Marshal(requestBody)
+
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodPut, "/admin/sites/"+strconv.FormatInt(site.ID, 10), bytes.NewBuffer(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", strconv.FormatInt(site.ID, 10))
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		rec := httptest.NewRecorder()
+
+		handler.UpdateSite(rec, req)
+
+		// Then: 400 Bad Request, INVALID_INPUT이고 details에 name 검증 메시지
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+		}
+		assertValidationFailed(t, rec, "name")
 	})
 }
 
@@ -523,9 +603,12 @@ func TestDeleteSite(t *testing.T) {
 
 		handler.DeleteSite(rec, req)
 
-		// Then: 403 Forbidden
+		// Then: 403 Forbidden, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
 }
@@ -689,9 +772,12 @@ func TestGetSiteStats(t *testing.T) {
 
 		handler.GetSiteStats(rec, req)
 
-		// Then: 403 Forbidden
+		// Then: 403 Forbidden, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status 403, got %d", rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
 }
@@ -837,9 +923,12 @@ func TestListSitePosts(t *testing.T) {
 
 		handler.ListSitePosts(rec, req)
 
-		// Then: 403 Forbidden
+		// Then: 403 Forbidden, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status 403, got %d", rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
 }
@@ -1063,11 +1152,179 @@ func TestGetPostComments(t *testing.T) {
 
 		handler.GetPostComments(rec, req)
 
-		// Then: 403 Forbidden
+		// Then: 403 Forbidden, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status 403, got %d", rec.Code)
 		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
+		}
 	})
+
+	t.Run("포스트 댓글 조회 실패 - 존재하지 않는 포스트", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 사용자와 사이트는 있지만 해당 slug의 포스트는 없음
+		user := &models.User{
+			Email:    "test@example.com",
+			Name:     "Test User",
+			GoogleID: "google-test",
+		}
+		database.CreateUser(ctx, tx, user)
+
+		site := &models.Site{
+			Name:        "Test Blog",
+			Domain:      "test.com",
+			CORSOrigins: []string{"https://test.com"},
+			IsActive:    true,
+		}
+		database.CreateSiteForUser(ctx, tx, site, user.ID)
+
+		// When: 존재하지 않는 slug로 댓글 조회
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodGet, "/admin/posts/no-such-post/comments?site_id="+strconv.FormatInt(site.ID, 10), nil)
+		rec := httptest.NewRecorder()
+
+		ctx = context.WithValue(ctx, userContextKey, user)
+		req = req.WithContext(ctx)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("slug", "no-such-post")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		handler.GetPostComments(rec, req)
+
+		// Then: 404 Not Found, POST_NOT_FOUND
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusNotFound, rec.Code, rec.Body.String())
+		}
+		if code := readErrorCode(t, rec); code != ErrPostNotFound {
+			t.Errorf("error.code = %q, want %q", code, ErrPostNotFound)
+		}
+	})
+}
+
+// TestAdminHandlers_InvalidSiteID는 사이트 ID(GetPostComments는 site_id 쿼리 파라미터)가
+// 숫자가 아닐 때 각 핸들러가 400 Bad Request, INVALID_INPUT을 반환하는지 검증합니다
+func TestAdminHandlers_InvalidSiteID(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 사용자 (ID 파싱이 사이트 소유 여부 확인보다 먼저 실패하므로 사이트 소유는 불필요)
+	user := &models.User{
+		Email:    "invalid-site-id@example.com",
+		Name:     "Invalid Site ID User",
+		GoogleID: "google-invalid-site-id",
+	}
+	if err := database.CreateUser(ctx, tx, user); err != nil {
+		t.Fatalf("Failed to create user: %v", err)
+	}
+
+	handler := NewAdminHandler(tx)
+	const invalidID = "not-a-number"
+
+	tests := []struct {
+		name string
+		call func() *httptest.ResponseRecorder
+	}{
+		{
+			name: "GetSite",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodGet, "/admin/sites/"+invalidID, nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", invalidID)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.GetSite(rec, req)
+				return rec
+			},
+		},
+		{
+			name: "UpdateSite",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodPut, "/admin/sites/"+invalidID, nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", invalidID)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.UpdateSite(rec, req)
+				return rec
+			},
+		},
+		{
+			name: "DeleteSite",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodDelete, "/admin/sites/"+invalidID, nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", invalidID)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.DeleteSite(rec, req)
+				return rec
+			},
+		},
+		{
+			name: "GetSiteStats",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodGet, "/admin/sites/"+invalidID+"/stats", nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", invalidID)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.GetSiteStats(rec, req)
+				return rec
+			},
+		},
+		{
+			name: "ListSitePosts",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodGet, "/admin/sites/"+invalidID+"/posts", nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", invalidID)
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.ListSitePosts(rec, req)
+				return rec
+			},
+		},
+		{
+			name: "GetPostComments",
+			call: func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodGet, "/admin/posts/some-post/comments?site_id="+invalidID, nil)
+				req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("slug", "some-post")
+				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				handler.GetPostComments(rec, req)
+				return rec
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// When: 숫자가 아닌 사이트 ID로 호출
+			rec := tc.call()
+
+			// Then: 400 Bad Request, INVALID_INPUT
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+			}
+			if code := readErrorCode(t, rec); code != ErrInvalidInput {
+				t.Errorf("error.code = %q, want %q", code, ErrInvalidInput)
+			}
+		})
+	}
 }
 
 // adminDeleteFixture는 어드민 댓글 삭제 테스트용 사용자·사이트·포스트입니다
@@ -1206,9 +1463,12 @@ func TestAdminDeleteComment(t *testing.T) {
 		// When: 없는 ID 삭제
 		rec := requestAdminDeleteComment(ctx, tx, f.owner, "999999999")
 
-		// Then: 404
+		// Then: 404, COMMENT_NOT_FOUND
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusNotFound, rec.Code, rec.Body.String())
+		}
+		if code := readErrorCode(t, rec); code != ErrCommentNotFound {
+			t.Errorf("error.code = %q, want %q", code, ErrCommentNotFound)
 		}
 	})
 
@@ -1227,9 +1487,12 @@ func TestAdminDeleteComment(t *testing.T) {
 		// When: 다른 사용자가 삭제
 		rec := requestAdminDeleteComment(ctx, tx, stranger, strconv.FormatInt(comment.ID, 10))
 
-		// Then: 403, 댓글은 그대로
+		// Then: 403, FORBIDDEN, 댓글은 그대로
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusForbidden, rec.Code, rec.Body.String())
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 		unchanged, err := database.GetCommentByID(ctx, tx, comment.ID)
 		if err != nil {
@@ -1258,9 +1521,12 @@ func TestAdminDeleteComment(t *testing.T) {
 		// When: 다른 사용자가 삭제
 		rec := requestAdminDeleteComment(ctx, tx, stranger, strconv.FormatInt(comment.ID, 10))
 
-		// Then: 삭제 여부를 드러내지 않고 403
+		// Then: 삭제 여부를 드러내지 않고 403, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusForbidden, rec.Code, rec.Body.String())
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
 
@@ -1275,9 +1541,12 @@ func TestAdminDeleteComment(t *testing.T) {
 			// When: 잘못된 ID로 삭제
 			rec := requestAdminDeleteComment(ctx, tx, f.owner, invalidID)
 
-			// Then: 400
+			// Then: 400, INVALID_INPUT
 			if rec.Code != http.StatusBadRequest {
 				t.Errorf("id=%q: Expected status %d, got %d", invalidID, http.StatusBadRequest, rec.Code)
+			}
+			if code := readErrorCode(t, rec); code != ErrInvalidInput {
+				t.Errorf("id=%q: error.code = %q, want %q", invalidID, code, ErrInvalidInput)
 			}
 		}
 	})
@@ -1296,9 +1565,12 @@ func TestAdminDeleteComment(t *testing.T) {
 		// When: 사용자 없이 삭제
 		rec := requestAdminDeleteComment(ctx, tx, nil, strconv.FormatInt(comment.ID, 10))
 
-		// Then: 401
+		// Then: 401, UNAUTHORIZED
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrUnauthorized {
+			t.Errorf("error.code = %q, want %q", code, ErrUnauthorized)
 		}
 	})
 

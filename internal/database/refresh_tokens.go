@@ -1,0 +1,233 @@
+package database
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/june20516/orbithall/internal/models"
+)
+
+// refreshTokenColumns는 refresh_tokens 조회 시 공통으로 읽는 컬럼 목록입니다
+// scanRefreshToken의 Scan 순서와 같아야 합니다
+const refreshTokenColumns = `id, user_id, family_id, parent_id, token_hash, expires_at,
+	family_expires_at, used_at, revoked_at, revoked_reason, created_at`
+
+// scanRefreshToken은 refreshTokenColumns 순서의 한 행을 RefreshToken으로 읽습니다
+func scanRefreshToken(row *sql.Row) (*models.RefreshToken, error) {
+	var token models.RefreshToken
+	err := row.Scan(
+		&token.ID,
+		&token.UserID,
+		&token.FamilyID,
+		&token.ParentID,
+		&token.TokenHash,
+		&token.ExpiresAt,
+		&token.FamilyExpiresAt,
+		&token.UsedAt,
+		&token.RevokedAt,
+		&token.RevokedReason,
+		&token.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &token, nil
+}
+
+// CreateRefreshTokenFamily는 로그인 시 새 계열의 첫 Refresh Token을 저장합니다
+// family_id는 DB가 gen_random_uuid()로 만듭니다
+func CreateRefreshTokenFamily(ctx context.Context, db DBTX, userID int64, tokenHash []byte, expiresAt, familyExpiresAt time.Time) (*models.RefreshToken, error) {
+	query := `
+		INSERT INTO refresh_tokens (user_id, family_id, token_hash, expires_at, family_expires_at)
+		VALUES ($1, gen_random_uuid(), $2, $3, $4)
+		RETURNING ` + refreshTokenColumns
+
+	token, err := scanRefreshToken(db.QueryRowContext(ctx, query, userID, tokenHash, expiresAt, familyExpiresAt))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create refresh token: %w", err)
+	}
+
+	return token, nil
+}
+
+// GetRefreshTokenByHash는 토큰 해시로 Refresh Token을 조회합니다
+// 찾지 못한 경우 nil을 반환합니다
+func GetRefreshTokenByHash(ctx context.Context, db DBTX, tokenHash []byte) (*models.RefreshToken, error) {
+	query := `SELECT ` + refreshTokenColumns + ` FROM refresh_tokens WHERE token_hash = $1`
+
+	token, err := scanRefreshToken(db.QueryRowContext(ctx, query, tokenHash))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get refresh token by hash: %w", err)
+	}
+
+	return token, nil
+}
+
+// GetChildRefreshToken은 parentID 토큰을 회전해 만든 후속 토큰을 조회합니다
+// 아직 회전하지 않은 토큰이면 nil을 반환합니다
+func GetChildRefreshToken(ctx context.Context, db DBTX, parentID int64) (*models.RefreshToken, error) {
+	query := `SELECT ` + refreshTokenColumns + ` FROM refresh_tokens WHERE parent_id = $1`
+
+	token, err := scanRefreshToken(db.QueryRowContext(ctx, query, parentID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get child refresh token: %w", err)
+	}
+
+	return token, nil
+}
+
+// RotateRefreshToken은 parentID 토큰을 사용 처리하고 같은 계열의 후속 토큰을 저장합니다
+//
+// 부모가 아직 사용되지 않았고 폐기되지 않은 경우에만 두 작업을 한 SQL 문장으로 처리합니다
+// 같은 부모로 동시에 요청이 와도 한 요청만 성공하고, 나머지는 nil을 받습니다
+// (부모 행을 먼저 잠근 요청이 커밋되면 다른 요청의 WHERE 조건이 다시 평가되어 0행이 됩니다)
+//
+// 같은 계열에 폐기된 토큰이 하나라도 있으면 회전하지 않습니다
+// 계열 폐기 UPDATE는 문장 시작 시점에 보이는 행만 폐기하므로, 동시에 진행 중이던 회전이 만든 후속 토큰은
+// 폐기되지 않은 채 남을 수 있습니다. 이 조건이 그런 토큰으로 세션이 이어지는 것을 막습니다
+//
+// 부모가 이미 사용되었거나, 폐기되었거나, 계열이 폐기되었으면 nil, nil을 반환합니다
+// 만료 판정은 호출자 책임입니다 (이 함수는 만료된 토큰도 회전합니다)
+func RotateRefreshToken(ctx context.Context, db DBTX, parentID int64, childHash []byte, childExpiresAt, now time.Time) (*models.RefreshToken, error) {
+	// INSERT ... SELECT의 SELECT 목록에 쓴 파라미터는 타입을 추론하지 못하므로 명시적으로 캐스팅합니다
+	query := `
+		WITH parent AS (
+			UPDATE refresh_tokens
+			SET used_at = $2
+			WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM refresh_tokens AS revoked
+					WHERE revoked.family_id = refresh_tokens.family_id AND revoked.revoked_at IS NOT NULL
+				)
+			RETURNING id, user_id, family_id, family_expires_at
+		)
+		INSERT INTO refresh_tokens (user_id, family_id, parent_id, token_hash, expires_at, family_expires_at)
+		SELECT user_id, family_id, id, $3::bytea, $4::timestamptz, family_expires_at
+		FROM parent
+		RETURNING ` + refreshTokenColumns
+
+	token, err := scanRefreshToken(db.QueryRowContext(ctx, query, parentID, now, childHash, childExpiresAt))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to rotate refresh token: %w", err)
+	}
+
+	return token, nil
+}
+
+// RevokeRefreshTokenFamily는 계열의 모든 토큰을 폐기합니다
+// 이미 폐기된 토큰은 처음 폐기 정보를 유지합니다 (여러 번 호출해도 결과가 같음)
+func RevokeRefreshTokenFamily(ctx context.Context, db DBTX, familyID string, reason string, now time.Time) error {
+	query := `
+		UPDATE refresh_tokens
+		SET revoked_at = $2, revoked_reason = $3
+		WHERE family_id = $1 AND revoked_at IS NULL
+	`
+
+	if _, err := db.ExecContext(ctx, query, familyID, now, reason); err != nil {
+		return fmt.Errorf("failed to revoke refresh token family: %w", err)
+	}
+
+	return nil
+}
+
+// IsRefreshTokenFamilyRevoked는 계열에 폐기된 토큰이 하나라도 있는지 반환합니다
+// 계열 폐기와 동시에 진행된 회전으로 revoked_at이 비어 있는 토큰이 남을 수 있으므로,
+// 개별 토큰의 revoked_at만으로는 계열 폐기 여부를 판단할 수 없습니다
+func IsRefreshTokenFamilyRevoked(ctx context.Context, db DBTX, familyID string) (bool, error) {
+	query := `SELECT EXISTS (SELECT 1 FROM refresh_tokens WHERE family_id = $1 AND revoked_at IS NOT NULL)`
+
+	var revoked bool
+	if err := db.QueryRowContext(ctx, query, familyID).Scan(&revoked); err != nil {
+		return false, fmt.Errorf("failed to check refresh token family revocation: %w", err)
+	}
+
+	return revoked, nil
+}
+
+// DeleteStaleRefreshTokens는 사용자의 토큰 중 before 이전에 절대 만료되었거나 폐기된 행을 삭제합니다
+// 로그인 시 호출해 별도 스케줄러 없이 테이블이 계속 커지지 않게 합니다
+func DeleteStaleRefreshTokens(ctx context.Context, db DBTX, userID int64, before time.Time) error {
+	query := `
+		DELETE FROM refresh_tokens
+		WHERE user_id = $1 AND (family_expires_at < $2 OR revoked_at < $2)
+	`
+
+	if _, err := db.ExecContext(ctx, query, userID, before); err != nil {
+		return fmt.Errorf("failed to delete stale refresh tokens: %w", err)
+	}
+
+	return nil
+}
+
+// LockUserSessions는 사용자 단위 advisory lock을 잡아, 같은 사용자의 로그인 세션 발급을 한 번에 하나씩만 진행하게 합니다
+// 반드시 트랜잭션 안에서 호출해야 합니다
+// pg_advisory_xact_lock으로 잡은 잠금은 트랜잭션이 커밋되거나 롤백될 때 자동으로 풀리며,
+// 트랜잭션 밖에서 호출하면 문장이 끝나는 즉시 풀려 직렬화 효과가 없습니다
+// 잠금 키는 사용자 ID(bigint)를 그대로 씁니다
+func LockUserSessions(ctx context.Context, db DBTX, userID int64) error {
+	if _, err := db.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, userID); err != nil {
+		return fmt.Errorf("failed to lock user sessions: %w", err)
+	}
+
+	return nil
+}
+
+// PruneRefreshTokenFamilies는 사용자의 활성 계열(로그인 세션) 중 가장 최근 keep개만 남기고
+// 나머지 활성 계열의 토큰을 모두 삭제합니다
+//
+// 계열이 활성이려면 두 조건을 모두 만족해야 합니다
+//   - 계열에 폐기된 토큰이 하나도 없음 (revoked_at IS NOT NULL인 행이 없음)
+//   - 계열의 가장 최근 토큰(id 최댓값)의 expires_at이 now보다 뒤 (아직 만료되지 않음)
+//
+// 활성 계열만 id 최댓값 기준 내림차순으로 정렬해 keep개를 넘는 오래된 활성 계열만 삭제합니다
+// 폐기되었거나 만료된 계열은 상한 계산과 삭제 대상 어디에도 포함하지 않습니다
+// (이런 계열은 DeleteStaleRefreshTokens가 보관 기간이 지난 뒤 별도로 정리합니다)
+//
+// 계열의 최근 여부는 계열에 속한 토큰 id의 최댓값으로 판단합니다
+// id는 저장 순서대로 커지므로, 먼저 로그인했더라도 최근에 회전된 계열은 최근 계열로 봅니다
+// (created_at은 같은 트랜잭션 안에서 같은 값이 될 수 있어 순서 기준으로 쓰지 않습니다)
+// 삭제된 계열의 Refresh Token은 더 이상 조회되지 않으므로 무효 토큰으로 처리됩니다
+func PruneRefreshTokenFamilies(ctx context.Context, db DBTX, userID int64, keep int, now time.Time) error {
+	if keep < 1 {
+		return fmt.Errorf("keep must be at least 1, got %d", keep)
+	}
+
+	query := `
+		WITH families AS (
+			SELECT family_id, MAX(id) AS max_id, BOOL_OR(revoked_at IS NOT NULL) AS has_revoked
+			FROM refresh_tokens
+			WHERE user_id = $1
+			GROUP BY family_id
+		),
+		active_families AS (
+			SELECT f.family_id, f.max_id
+			FROM families f
+			JOIN refresh_tokens latest ON latest.id = f.max_id
+			WHERE NOT f.has_revoked AND latest.expires_at > $2
+		)
+		DELETE FROM refresh_tokens
+		WHERE user_id = $1 AND family_id IN (
+			SELECT family_id
+			FROM active_families
+			ORDER BY max_id DESC
+			OFFSET $3
+		)
+	`
+
+	if _, err := db.ExecContext(ctx, query, userID, now, keep); err != nil {
+		return fmt.Errorf("failed to prune refresh token families: %w", err)
+	}
+
+	return nil
+}
