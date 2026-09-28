@@ -213,6 +213,30 @@ func TestSessionHandler_Refresh(t *testing.T) {
 		}
 	})
 
+	t.Run("세션 발급 뒤 사용자가 삭제되면 401 INVALID_REFRESH_TOKEN", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 로그인 세션을 발급한 뒤 사용자 삭제 (토큰 행은 CASCADE로 함께 삭제됨)
+		user := createSessionTestUser(ctx, t, tx)
+		login := mustIssueSession(ctx, t, tx, user, sessionTestConfig())
+		if _, err := tx.ExecContext(ctx, "DELETE FROM users WHERE id = $1", user.ID); err != nil {
+			t.Fatalf("failed to delete user: %v", err)
+		}
+		handler := newTestSessionHandler(tx, sessionTestTime.Add(time.Minute))
+
+		// When: 갱신
+		rec := postSessionRequest(handler.Refresh, "/auth/refresh", refreshTokenBody(t, login.RefreshToken))
+
+		// Then: 401 INVALID_REFRESH_TOKEN
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d", rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrInvalidRefreshToken {
+			t.Errorf("error.code = %q", code)
+		}
+	})
+
 	t.Run("요청 제한을 넘으면 429와 Retry-After", func(t *testing.T) {
 		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
 		defer cleanup()

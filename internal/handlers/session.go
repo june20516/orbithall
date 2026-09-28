@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/june20516/orbithall/internal/auth"
@@ -154,7 +155,7 @@ func reissueWithinGrace(ctx context.Context, db database.DBTX, used *models.Refr
 	}
 
 	if now.Sub(*used.UsedAt) > cfg.ReuseGrace {
-		return nil, revokeFamilyForReuse(ctx, db, used.FamilyID, now)
+		return nil, revokeFamilyForReuse(ctx, db, used.UserID, used.FamilyID, now)
 	}
 
 	child, err := database.GetChildRefreshToken(ctx, db, used.ID)
@@ -162,7 +163,7 @@ func reissueWithinGrace(ctx context.Context, db database.DBTX, used *models.Refr
 		return nil, err
 	}
 	if child == nil || child.UsedAt != nil {
-		return nil, revokeFamilyForReuse(ctx, db, used.FamilyID, now)
+		return nil, revokeFamilyForReuse(ctx, db, used.UserID, used.FamilyID, now)
 	}
 	// 계열 폐기 확인 뒤 로그아웃이 커밋된 경우입니다
 	if child.RevokedAt != nil {
@@ -188,10 +189,12 @@ func reissueWithinGrace(ctx context.Context, db database.DBTX, used *models.Refr
 }
 
 // revokeFamilyForReuse는 재사용 탐지로 계열 전체를 폐기하고 errSessionReused를 반환합니다
-func revokeFamilyForReuse(ctx context.Context, db database.DBTX, familyID string, now time.Time) error {
+// 탈취 신호이므로 사후 조사를 위해 사용자와 계열 ID를 로그에 남깁니다 (토큰 원문과 해시는 남기지 않습니다)
+func revokeFamilyForReuse(ctx context.Context, db database.DBTX, userID int64, familyID string, now time.Time) error {
 	if err := database.RevokeRefreshTokenFamily(ctx, db, familyID, models.RefreshTokenRevokedByReuse, now); err != nil {
 		return err
 	}
+	log.Printf("[WARN] refresh token reuse detected: user_id=%d family_id=%s", userID, familyID)
 	return errSessionReused
 }
 

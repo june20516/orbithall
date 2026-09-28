@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strings"
 
@@ -49,6 +50,8 @@ func JWTAuthMiddleware(db database.DBTX) func(http.Handler) http.Handler {
 			// 4. 사용자 조회
 			user, err := database.GetUserByID(r.Context(), db, claims.UserID)
 			if err != nil {
+				// details는 응답 본문에 들어가므로 원인은 서버 로그에만 남깁니다
+				log.Printf("[ERROR] jwt auth: get user: %v", err)
 				respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get user", nil)
 				return
 			}
