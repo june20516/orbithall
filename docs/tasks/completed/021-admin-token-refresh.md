@@ -1,4 +1,4 @@
-# [WIP] 어드민 토큰 갱신 (Refresh Token)
+# 어드민 토큰 갱신 (Refresh Token)
 
 ## 작성일
 2026-09-28
@@ -41,3 +41,10 @@
 
 ## 작업 이력
 ### [2026-09-28] 작업 시작
+
+### [2026-09-28] 구현 완료
+- refresh_tokens 테이블(006), `/auth/refresh`, `/auth/logout` 추가
+- 로그인 응답에 토큰 쌍 추가, 인증 에러 본문 객체 형식 통일
+- Access Token 클레임(typ·iss·aud·exp) 필수, HS256 고정, JWT_SECRET·REFRESH_TOKEN_SECRET 시작 시 검증
+- 리뷰 반영: 계열 폐기와 회전 경합 차단(NOT EXISTS, 유예 재반환 전 계열 폐기 확인), 회전 전 사용자 조회·토큰 발급, 동시성 테스트
+- 후속: p1-022 (전환 3단계), p9-023 (보강 과제), orbithall-admin 갱신 구현
