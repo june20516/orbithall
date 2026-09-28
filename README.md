@@ -152,12 +152,15 @@ Headers: X-Orbithall-API-Key
 
 #### 인증
 
+로그인하면 Access Token(7일)과 Refresh Token(유휴 14일, 최대 30일)을 발급합니다. 상세 규칙은 `docs/specs/admin-auth-token-refresh.md`를 참고하세요.
+
 ```
-POST /auth/google/verify
-Content-Type: application/json
+POST /auth/google/verify   # Google ID Token 검증 후 토큰 쌍 발급
+POST /auth/refresh         # Refresh Token 회전, 새 토큰 쌍 발급
+POST /auth/logout          # Refresh Token이 속한 세션 폐기 (204)
 ```
 
-요청 예시:
+로그인 요청 예시:
 ```json
 {
   "id_token": "Google OAuth ID Token",
@@ -165,6 +168,19 @@ Content-Type: application/json
   "name": "사용자 이름"
 }
 ```
+
+로그인·갱신 응답의 토큰 필드:
+```json
+{
+  "token_type": "Bearer",
+  "access_token": "eyJ...",
+  "access_token_expires_at": "2026-10-08T12:00:00Z",
+  "refresh_token": "ohrt_...",
+  "refresh_token_expires_at": "2026-10-15T12:00:00Z"
+}
+```
+
+갱신·로그아웃 요청 본문은 `{"refresh_token": "ohrt_..."}`입니다. 인증 에러는 `{"error":{"code","message"}}` 형식입니다.
 
 #### 사이트 관리
 
@@ -191,6 +207,12 @@ GET /admin/profile          # 내 프로필 조회
 | `PORT`         | API 서버 포트                 | `8080`                       |
 | `DATABASE_URL` | PostgreSQL 연결 문자열        | docker-compose에서 자동 설정 |
 | `ENV`          | 환경 (development/production) | `development`                |
+| `JWT_SECRET`                 | Access Token 서명 키 (32자 이상)                        | (필수)                       |
+| `JWT_EXPIRATION_HOURS`       | Access Token 수명(시간)                                  | `168`                        |
+| `REFRESH_TOKEN_SECRET`       | 후속 Refresh Token 파생 키 (32자 이상, JWT_SECRET과 다름) | (필수)                       |
+| `REFRESH_TOKEN_IDLE_TTL`     | Refresh Token 유휴 만료                                  | `336h`                       |
+| `REFRESH_TOKEN_ABSOLUTE_TTL` | 세션 절대 만료                                           | `720h`                       |
+| `REFRESH_TOKEN_REUSE_GRACE`  | 사용된 Refresh Token 재제출 유예 시간                    | `30s`                        |
 
 **참고**: CORS는 사이트별 동적 검증 방식을 사용합니다. 각 사이트의 `cors_origins` 배열로 관리됩니다.
 
@@ -201,6 +223,7 @@ API 남용 방지를 위해 IP 기반 요청 제한이 적용됩니다.
 ### 제한 정책
 
 - **댓글 작성**: 10회/분 (burst: 5)
+- **어드민 토큰 갱신**: 로그인 세션(계열)당 10회/분 (burst: 10), IP 기준 아님
 - **댓글 조회**: 제한 없음
 - **댓글 수정/삭제**: 제한 없음 (30분 시간 제한으로 충분)
 
