@@ -170,6 +170,19 @@ func DeleteStaleRefreshTokens(ctx context.Context, db DBTX, userID int64, before
 	return nil
 }
 
+// LockUserSessions는 사용자 단위 advisory lock을 잡아, 같은 사용자의 로그인 세션 발급을 한 번에 하나씩만 진행하게 합니다
+// 반드시 트랜잭션 안에서 호출해야 합니다
+// pg_advisory_xact_lock으로 잡은 잠금은 트랜잭션이 커밋되거나 롤백될 때 자동으로 풀리며,
+// 트랜잭션 밖에서 호출하면 문장이 끝나는 즉시 풀려 직렬화 효과가 없습니다
+// 잠금 키는 사용자 ID(bigint)를 그대로 씁니다
+func LockUserSessions(ctx context.Context, db DBTX, userID int64) error {
+	if _, err := db.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, userID); err != nil {
+		return fmt.Errorf("failed to lock user sessions: %w", err)
+	}
+
+	return nil
+}
+
 // PruneRefreshTokenFamilies는 사용자의 활성 계열(로그인 세션) 중 가장 최근 keep개만 남기고
 // 나머지 활성 계열의 토큰을 모두 삭제합니다
 //

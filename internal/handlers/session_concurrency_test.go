@@ -160,3 +160,113 @@ func TestRotateSession_ConcurrentSameToken(t *testing.T) {
 		t.Errorf("child count = %d, want 1", childCount)
 	}
 }
+
+// waitForSessionAnyLockWait는 pid 세션이 어떤 종류든 잠금을 기다리는 상태가 될 때까지 폴링하고, 기다리는 잠금 종류(wait_event)를 반환합니다
+func waitForSessionAnyLockWait(ctx context.Context, t *testing.T, db *sql.DB, pid int) string {
+	t.Helper()
+	query := `
+		SELECT COALESCE(MAX(wait_event), '')
+		FROM pg_stat_activity
+		WHERE pid = $1
+			AND datname = current_database()
+			AND wait_event_type = 'Lock'
+	`
+
+	deadline := time.Now().Add(sessionLockWaitTimeout)
+	for time.Now().Before(deadline) {
+		var waitEvent string
+		if err := db.QueryRowContext(ctx, query, pid).Scan(&waitEvent); err != nil {
+			t.Fatalf("failed to poll pg_stat_activity: %v", err)
+		}
+		if waitEvent != "" {
+			return waitEvent
+		}
+		time.Sleep(sessionLockWaitPollInterval)
+	}
+	t.Fatalf("session %d did not start waiting for a lock within %v", pid, sessionLockWaitTimeout)
+	return ""
+}
+
+// countActiveSessionFamilies는 사용자의 폐기되지 않은 Refresh Token 계열 수를 셉니다
+func countActiveSessionFamilies(ctx context.Context, t *testing.T, db *sql.DB, userID int64) int {
+	t.Helper()
+	var count int
+	query := `SELECT COUNT(DISTINCT family_id) FROM refresh_tokens WHERE user_id = $1 AND revoked_at IS NULL`
+	if err := db.QueryRowContext(ctx, query, userID).Scan(&count); err != nil {
+		t.Fatalf("failed to count active session families: %v", err)
+	}
+	return count
+}
+
+// TestIssueSession_ConcurrentLoginKeepsLimit는 활성 세션이 상한만큼 있는 사용자가 동시에 두 번 로그인해도
+// 두 로그인이 사용자 단위로 직렬화되어 활성 세션 수가 상한을 넘지 않는지 테스트합니다
+func TestIssueSession_ConcurrentLoginKeepsLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping session concurrency test in short mode")
+	}
+	db := testhelpers.SetupTestDB(t)
+	t.Cleanup(func() { database.Close(db) })
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	cfg := sessionTestConfig()
+
+	// Given: 활성 세션이 상한만큼 커밋된 사용자
+	user := createCommittedSessionTestUser(ctx, t, db)
+	for i := 0; i < maxSessionsPerUser; i++ {
+		if _, err := issueSession(ctx, db, user, cfg, sessionTestTime); err != nil {
+			t.Fatalf("failed to issue session %d: %v", i, err)
+		}
+	}
+
+	// Given: 트랜잭션 A가 로그인 세션을 발급하고 커밋하지 않은 채 대기
+	txA, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin transaction A: %v", err)
+	}
+	if _, err := issueSession(ctx, txA, user, cfg, sessionTestTime); err != nil {
+		txA.Rollback()
+		t.Fatalf("expected issue session in A to succeed, got: %v", err)
+	}
+
+	// When: 다른 연결의 트랜잭션 B에서 같은 사용자로 로그인 세션을 발급하고 커밋
+	connB, pidB := openSessionDedicatedConn(ctx, t, db)
+	defer connB.Close()
+	resultB := make(chan error, 1)
+	doneB := make(chan struct{})
+	go func() {
+		defer close(doneB)
+		txB, err := connB.BeginTx(ctx, nil)
+		if err != nil {
+			resultB <- err
+			return
+		}
+		defer txB.Rollback()
+		if _, err := issueSession(ctx, txB, user, cfg, sessionTestTime); err != nil {
+			resultB <- err
+			return
+		}
+		resultB <- txB.Commit()
+	}()
+	// 중간에 테스트가 중단되어도 A를 끝내 B가 풀려나고, B가 끝난 뒤에 연결을 닫습니다
+	defer func() {
+		txA.Rollback()
+		<-doneB
+	}()
+
+	// Then: B는 A가 끝날 때까지 사용자 단위 advisory lock을 기다림
+	if waitEvent := waitForSessionAnyLockWait(ctx, t, db, pidB); waitEvent != "advisory" {
+		t.Errorf("B wait_event = %q, want %q", waitEvent, "advisory")
+	}
+
+	if err := txA.Commit(); err != nil {
+		t.Fatalf("failed to commit transaction A: %v", err)
+	}
+	if err := <-resultB; err != nil {
+		t.Fatalf("expected issue session in B to succeed, got: %v", err)
+	}
+
+	// Then: 두 로그인이 모두 커밋된 뒤에도 활성 세션은 정확히 상한만큼
+	if count := countActiveSessionFamilies(ctx, t, db, user.ID); count != maxSessionsPerUser {
+		t.Errorf("active session families = %d, want %d", count, maxSessionsPerUser)
+	}
+}

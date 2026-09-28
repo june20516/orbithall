@@ -43,7 +43,15 @@ type TokenPairResponse struct {
 
 // issueSession은 로그인한 사용자에게 새 세션(Access Token + 새 계열의 첫 Refresh Token)을 발급합니다
 // 같은 사용자의 오래된 Refresh Token을 정리하고, 활성 세션 수가 maxSessionsPerUser를 넘으면 가장 오래된 활성 세션을 삭제합니다
+//
+// 이 함수는 트랜잭션 안에서 호출된다는 전제로 동작합니다 (GoogleVerify가 사용자 조회·생성과 같은 트랜잭션을 넘깁니다)
+// 같은 사용자의 로그인이 동시에 들어오면 서로가 아직 커밋하지 않은 새 세션을 보지 못해 상한을 넘을 수 있으므로,
+// 시작할 때 사용자 단위 잠금을 잡아 한 번에 하나씩 처리합니다 (잠금은 트랜잭션이 커밋·롤백될 때 자동으로 풀립니다)
 func issueSession(ctx context.Context, db database.DBTX, user *models.User, cfg auth.RefreshTokenConfig, now time.Time) (*TokenPairResponse, error) {
+	if err := database.LockUserSessions(ctx, db, user.ID); err != nil {
+		return nil, err
+	}
+
 	if err := database.DeleteStaleRefreshTokens(ctx, db, user.ID, now.Add(-staleRefreshTokenRetention)); err != nil {
 		return nil, err
 	}
