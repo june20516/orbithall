@@ -208,9 +208,12 @@ func TestGetSite(t *testing.T) {
 
 		handler.GetSite(rec, req)
 
-		// Then: 404 Not Found
+		// Then: 404 Not Found, SITE_NOT_FOUND
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrSiteNotFound {
+			t.Errorf("error.code = %q, want %q", code, ErrSiteNotFound)
 		}
 	})
 
@@ -238,9 +241,12 @@ func TestGetSite(t *testing.T) {
 
 		handler.GetSite(rec, req)
 
-		// Then: 404 Not Found
+		// Then: 404 Not Found, SITE_NOT_FOUND
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrSiteNotFound {
+			t.Errorf("error.code = %q, want %q", code, ErrSiteNotFound)
 		}
 	})
 }
@@ -432,9 +438,12 @@ func TestUpdateSite(t *testing.T) {
 
 		handler.UpdateSite(rec, req)
 
-		// Then: 403 Forbidden
+		// Then: 403 Forbidden, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
 }
@@ -523,9 +532,12 @@ func TestDeleteSite(t *testing.T) {
 
 		handler.DeleteSite(rec, req)
 
-		// Then: 403 Forbidden
+		// Then: 403 Forbidden, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
 }
@@ -689,9 +701,12 @@ func TestGetSiteStats(t *testing.T) {
 
 		handler.GetSiteStats(rec, req)
 
-		// Then: 403 Forbidden
+		// Then: 403 Forbidden, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status 403, got %d", rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
 }
@@ -837,9 +852,12 @@ func TestListSitePosts(t *testing.T) {
 
 		handler.ListSitePosts(rec, req)
 
-		// Then: 403 Forbidden
+		// Then: 403 Forbidden, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status 403, got %d", rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
 }
@@ -1063,9 +1081,12 @@ func TestGetPostComments(t *testing.T) {
 
 		handler.GetPostComments(rec, req)
 
-		// Then: 403 Forbidden
+		// Then: 403 Forbidden, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status 403, got %d", rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
 }
@@ -1206,9 +1227,12 @@ func TestAdminDeleteComment(t *testing.T) {
 		// When: 없는 ID 삭제
 		rec := requestAdminDeleteComment(ctx, tx, f.owner, "999999999")
 
-		// Then: 404
+		// Then: 404, COMMENT_NOT_FOUND
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusNotFound, rec.Code, rec.Body.String())
+		}
+		if code := readErrorCode(t, rec); code != ErrCommentNotFound {
+			t.Errorf("error.code = %q, want %q", code, ErrCommentNotFound)
 		}
 	})
 
@@ -1227,9 +1251,12 @@ func TestAdminDeleteComment(t *testing.T) {
 		// When: 다른 사용자가 삭제
 		rec := requestAdminDeleteComment(ctx, tx, stranger, strconv.FormatInt(comment.ID, 10))
 
-		// Then: 403, 댓글은 그대로
+		// Then: 403, FORBIDDEN, 댓글은 그대로
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusForbidden, rec.Code, rec.Body.String())
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 		unchanged, err := database.GetCommentByID(ctx, tx, comment.ID)
 		if err != nil {
@@ -1258,9 +1285,12 @@ func TestAdminDeleteComment(t *testing.T) {
 		// When: 다른 사용자가 삭제
 		rec := requestAdminDeleteComment(ctx, tx, stranger, strconv.FormatInt(comment.ID, 10))
 
-		// Then: 삭제 여부를 드러내지 않고 403
+		// Then: 삭제 여부를 드러내지 않고 403, FORBIDDEN
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusForbidden, rec.Code, rec.Body.String())
+		}
+		if code := readErrorCode(t, rec); code != ErrForbidden {
+			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
 	})
 
@@ -1275,9 +1305,12 @@ func TestAdminDeleteComment(t *testing.T) {
 			// When: 잘못된 ID로 삭제
 			rec := requestAdminDeleteComment(ctx, tx, f.owner, invalidID)
 
-			// Then: 400
+			// Then: 400, INVALID_INPUT
 			if rec.Code != http.StatusBadRequest {
 				t.Errorf("id=%q: Expected status %d, got %d", invalidID, http.StatusBadRequest, rec.Code)
+			}
+			if code := readErrorCode(t, rec); code != ErrInvalidInput {
+				t.Errorf("id=%q: error.code = %q, want %q", invalidID, code, ErrInvalidInput)
 			}
 		}
 	})
@@ -1296,9 +1329,12 @@ func TestAdminDeleteComment(t *testing.T) {
 		// When: 사용자 없이 삭제
 		rec := requestAdminDeleteComment(ctx, tx, nil, strconv.FormatInt(comment.ID, 10))
 
-		// Then: 401
+		// Then: 401, UNAUTHORIZED
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrUnauthorized {
+			t.Errorf("error.code = %q, want %q", code, ErrUnauthorized)
 		}
 	})
 

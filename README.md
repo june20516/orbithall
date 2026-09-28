@@ -183,7 +183,7 @@ POST /auth/logout          # Refresh Token이 속한 세션 폐기 (204)
 }
 ```
 
-갱신·로그아웃 요청 본문은 `{"refresh_token": "ohrt_..."}`입니다. 인증 에러는 `{"error": {"code": "EXPIRED_TOKEN", "message": "..."}}` 형식입니다.
+갱신·로그아웃 요청 본문은 `{"refresh_token": "ohrt_..."}`입니다. 인증 에러는 `{"error": {"code": "EXPIRED_TOKEN", "message": "..."}}` 형식이며, `/admin/*` 핸들러 본문의 에러도 같은 객체 형식입니다.
 
 #### 사이트 관리
 

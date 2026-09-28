@@ -28,10 +28,12 @@ const (
 	// 리소스 관련 에러
 	ErrPostNotFound    = "POST_NOT_FOUND"    // 포스트 없음
 	ErrCommentNotFound = "COMMENT_NOT_FOUND" // 댓글 없음
+	ErrSiteNotFound    = "SITE_NOT_FOUND"    // 사이트 없음
 
 	// 권한 관련 에러
 	ErrWrongPassword   = "WRONG_PASSWORD"    // 비밀번호 불일치
 	ErrEditTimeExpired = "EDIT_TIME_EXPIRED" // 수정 가능 시간 초과
+	ErrForbidden       = "FORBIDDEN"         // 리소스 접근 권한 없음
 
 	// 어드민 인증 에러
 	ErrMissingToken        = "MISSING_TOKEN"         // Authorization 헤더 없음
@@ -42,6 +44,7 @@ const (
 	ErrInvalidRefreshToken = "INVALID_REFRESH_TOKEN" // Refresh Token이 없거나 폐기됨
 	ErrRefreshTokenExpired = "REFRESH_TOKEN_EXPIRED" // Refresh Token 만료
 	ErrRefreshTokenReused  = "REFRESH_TOKEN_REUSED"  // 사용된 Refresh Token 재사용 (세션 폐기됨)
+	ErrUnauthorized        = "UNAUTHORIZED"          // Context에 인증된 사용자 없음 (JWT 미들웨어 통과 후에는 발생하지 않는 방어 코드)
 
 	// Rate limiting 에러
 	ErrRateLimitExceeded = "RATE_LIMIT_EXCEEDED" // Rate limit 초과

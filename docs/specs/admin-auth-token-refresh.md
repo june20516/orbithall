@@ -4,7 +4,7 @@
 2026-09-28
 
 ## 버전
-v1.6 (세션 상한 계산 보강)
+v1.7 (`/admin/*` 핸들러 에러 응답 객체 형식 통일)
 
 ## 개요
 어드민 로그인 세션에 **회전(rotation)되는 Refresh Token**을 도입해, Access Token이 만료되면 재로그인 없이 연장할 수 있게 한다.
@@ -80,8 +80,9 @@ SO THAT 토큰이 유출되어도 계속 악용되지 않는다
 | JWT 미들웨어 (`/admin/*`의 401) | `{"error":"CODE","message":"..."}` | 객체 형식 |
 | `POST /auth/google/verify` | 평문(`text/plain`) | 객체 형식 |
 | `POST /auth/refresh`, `/auth/logout` | - | 객체 형식 |
+| `/admin/*` 핸들러 본문 | 평문(`text/plain`) | 객체 형식 |
 
-`/admin/*` 핸들러 본문의 평문 에러(`http.Error`)는 이번 범위가 아니며, 별도 작업으로 통일한다.
+`/admin/*` 핸들러 본문의 에러도 같은 객체 형식이다(코드: INVALID_INPUT, UNAUTHORIZED, FORBIDDEN, SITE_NOT_FOUND, POST_NOT_FOUND, COMMENT_NOT_FOUND, INTERNAL_SERVER_ERROR).
 
 ### 2.1 로그인 (변경)
 ```
@@ -425,3 +426,4 @@ CREATE UNIQUE INDEX idx_refresh_tokens_parent_id ON refresh_tokens(parent_id) WH
 | 2026-09-28 | v1.4 | 호환용 `token` 필드 제거, 전환 단계를 함께 배포 한 번으로 통합 | Bran |
 | 2026-09-28 | v1.5 | 로그인 시 ID Token의 검증된 이메일·이름·사진 우선 사용(요청 본문 `email`·`name` 선택), 이메일 미검증 토큰 거부, 첫 로그인 동시 요청 시 사용자 생성 경합 제거, 사용자당 세션 10개 상한 | Bran |
 | 2026-09-28 | v1.6 | 세션 수 상한 계산에서 폐기·만료된 계열 제외(활성 계열만 상한 대상) | Bran |
+| 2026-09-28 | v1.7 | `/admin/*` 핸들러 본문의 평문 에러(`http.Error`)를 객체 형식으로 통일 | Bran |
