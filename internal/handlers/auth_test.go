@@ -2,12 +2,17 @@ package handlers
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/june20516/orbithall/internal/auth"
 	"github.com/june20516/orbithall/internal/database"
 	"github.com/june20516/orbithall/internal/testhelpers"
 )
@@ -149,6 +154,214 @@ func TestGoogleVerify_InvalidGoogleToken(t *testing.T) {
 	}
 }
 
-// 참고: 실제 Google ID Token 검증 및 JWT 발급 테스트는 통합 테스트에서 수행
-// 실제 토큰을 사용하려면 Google OAuth Playground에서 발급받아야 함
-// 또는 VerifyGoogleIDToken을 모킹하는 별도 테스트가 필요함
+// googleVerifyTestTime은 로그인 성공 경로 테스트에 주입하는 고정 시각입니다
+var googleVerifyTestTime = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+
+// newGoogleVerifyTestIdentity는 커밋되는 테스트 데이터용 고유 google_id와 email을 만들고,
+// 테스트 종료 시 그 google_id의 사용자를 삭제합니다 (CASCADE로 토큰도 함께 삭제됨)
+func newGoogleVerifyTestIdentity(t *testing.T, db *sql.DB) (googleID string, email string) {
+	t.Helper()
+	suffix := fmt.Sprintf("google-verify-%d", time.Now().UnixNano())
+	googleID = "google-" + suffix
+	email = suffix + "@example.com"
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM users WHERE google_id = $1`, googleID); err != nil {
+			t.Errorf("failed to delete committed test user: %v", err)
+		}
+	})
+	return googleID, email
+}
+
+// newGoogleVerifyTestHandler는 Google 검증 결과를 고정 payload로, 현재 시각을 고정 시각으로 바꾼 핸들러를 만듭니다
+func newGoogleVerifyTestHandler(db *sql.DB, googleID string, email string) *AuthHandler {
+	handler := NewAuthHandler(db)
+	handler.now = func() time.Time { return googleVerifyTestTime }
+	handler.verifyIDToken = func(ctx context.Context, idToken string) (*auth.GoogleIDTokenPayload, error) {
+		return &auth.GoogleIDTokenPayload{GoogleID: googleID, Email: email, Name: "Google Verify User"}, nil
+	}
+	return handler
+}
+
+// callGoogleVerify는 유효한 형식의 로그인 요청으로 GoogleVerify를 호출합니다
+func callGoogleVerify(t *testing.T, handler *AuthHandler, email string) *httptest.ResponseRecorder {
+	t.Helper()
+	bodyBytes, err := json.Marshal(map[string]interface{}{
+		"id_token": "fake-google-id-token",
+		"email":    email,
+		"name":     "Google Verify User",
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal request body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/google/verify", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.GoogleVerify(rec, req)
+	return rec
+}
+
+// decodeGoogleVerifyResponse는 성공 응답 본문을 해석합니다
+func decodeGoogleVerifyResponse(t *testing.T, rec *httptest.ResponseRecorder) GoogleVerifyResponse {
+	t.Helper()
+	var body GoogleVerifyResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v, body: %s", err, rec.Body.String())
+	}
+	return body
+}
+
+// countUsersByGoogleID는 google_id 사용자의 users 행 수를 셉니다
+func countUsersByGoogleID(t *testing.T, db *sql.DB, googleID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM users WHERE google_id = $1`, googleID).Scan(&count); err != nil {
+		t.Fatalf("failed to count users: %v", err)
+	}
+	return count
+}
+
+// countRefreshTokensByGoogleID는 google_id 사용자의 refresh_tokens 행 수를 셉니다
+func countRefreshTokensByGoogleID(t *testing.T, db *sql.DB, googleID string) int {
+	t.Helper()
+	var count int
+	query := `SELECT COUNT(*) FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id WHERE u.google_id = $1`
+	if err := db.QueryRowContext(context.Background(), query, googleID).Scan(&count); err != nil {
+		t.Fatalf("failed to count refresh tokens: %v", err)
+	}
+	return count
+}
+
+// TestGoogleVerify_NewUserSuccess는 신규 사용자 로그인 시 사용자 생성과 세션 발급 결과를 테스트합니다
+func TestGoogleVerify_NewUserSuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping committed login test in short mode")
+	}
+	db := testhelpers.SetupTestDB(t)
+	t.Cleanup(func() { database.Close(db) })
+
+	// Given: 아직 가입하지 않은 사용자의 검증된 Google ID Token
+	googleID, email := newGoogleVerifyTestIdentity(t, db)
+	handler := newGoogleVerifyTestHandler(db, googleID, email)
+
+	// When: GoogleVerify 호출
+	rec := callGoogleVerify(t, handler, email)
+
+	// Then: 200과 토큰 쌍, 호환용 token, 생성된 사용자, 캐시 금지 헤더
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want %q", got, "no-store")
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	for _, field := range []string{"access_token_expires_at", "refresh_token_expires_at"} {
+		if _, ok := raw[field]; !ok {
+			t.Errorf("response is missing %q", field)
+		}
+	}
+
+	body := decodeGoogleVerifyResponse(t, rec)
+	if body.TokenType != "Bearer" {
+		t.Errorf("token_type = %q, want %q", body.TokenType, "Bearer")
+	}
+	if body.AccessToken == "" {
+		t.Error("access_token is empty")
+	}
+	if body.RefreshToken == "" {
+		t.Error("refresh_token is empty")
+	}
+	if body.Token != body.AccessToken {
+		t.Errorf("token = %q, want access_token %q", body.Token, body.AccessToken)
+	}
+
+	stored, err := database.GetUserByGoogleID(context.Background(), db, googleID)
+	if err != nil {
+		t.Fatalf("failed to get created user: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("user was not created")
+	}
+	if body.User == nil || body.User.ID != stored.ID {
+		t.Errorf("response user = %+v, want id %d", body.User, stored.ID)
+	}
+	if count := countRefreshTokensByGoogleID(t, db, googleID); count != 1 {
+		t.Errorf("refresh_tokens rows = %d, want 1", count)
+	}
+}
+
+// TestGoogleVerify_ExistingUserStartsNewFamily는 같은 사용자가 다시 로그인하면 새 계열이 발급되는지 테스트합니다
+func TestGoogleVerify_ExistingUserStartsNewFamily(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping committed login test in short mode")
+	}
+	db := testhelpers.SetupTestDB(t)
+	t.Cleanup(func() { database.Close(db) })
+
+	// Given: 한 번 로그인한 사용자
+	googleID, email := newGoogleVerifyTestIdentity(t, db)
+	handler := newGoogleVerifyTestHandler(db, googleID, email)
+	first := callGoogleVerify(t, handler, email)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first login: expected status %d, got %d. Body: %s", http.StatusOK, first.Code, first.Body.String())
+	}
+	firstBody := decodeGoogleVerifyResponse(t, first)
+
+	// When: 같은 사용자가 다시 로그인
+	second := callGoogleVerify(t, handler, email)
+
+	// Then: 200, 새 Refresh Token, 서로 다른 계열 두 개
+	if second.Code != http.StatusOK {
+		t.Fatalf("second login: expected status %d, got %d. Body: %s", http.StatusOK, second.Code, second.Body.String())
+	}
+	secondBody := decodeGoogleVerifyResponse(t, second)
+	if secondBody.RefreshToken == firstBody.RefreshToken {
+		t.Error("second login returned the same refresh_token")
+	}
+	if secondBody.User == nil || firstBody.User == nil || secondBody.User.ID != firstBody.User.ID {
+		t.Errorf("second login user = %+v, want same user as first %+v", secondBody.User, firstBody.User)
+	}
+
+	var familyCount int
+	query := `SELECT COUNT(DISTINCT rt.family_id) FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id WHERE u.google_id = $1`
+	if err := db.QueryRowContext(context.Background(), query, googleID).Scan(&familyCount); err != nil {
+		t.Fatalf("failed to count families: %v", err)
+	}
+	if familyCount != 2 {
+		t.Errorf("distinct family_id = %d, want 2", familyCount)
+	}
+}
+
+// TestGoogleVerify_SessionFailureRollsBackUser는 세션 발급이 실패하면 새 사용자 생성까지 되돌리는지 테스트합니다
+func TestGoogleVerify_SessionFailureRollsBackUser(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping committed login test in short mode")
+	}
+	db := testhelpers.SetupTestDB(t)
+	t.Cleanup(func() { database.Close(db) })
+
+	// Given: 신규 사용자, Access Token 발급이 실패하는 짧은 JWT_SECRET
+	googleID, email := newGoogleVerifyTestIdentity(t, db)
+	handler := newGoogleVerifyTestHandler(db, googleID, email)
+	t.Setenv("JWT_SECRET", "short")
+
+	// When: GoogleVerify 호출
+	rec := callGoogleVerify(t, handler, email)
+
+	// Then: 500이고, 사용자와 Refresh Token이 모두 남지 않음
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusInternalServerError, rec.Code, rec.Body.String())
+	}
+	if code := readErrorCode(t, rec); code != ErrInternalServer {
+		t.Errorf("error.code = %q, want %q", code, ErrInternalServer)
+	}
+	if count := countUsersByGoogleID(t, db, googleID); count != 0 {
+		t.Errorf("users rows = %d, want 0", count)
+	}
+	if count := countRefreshTokensByGoogleID(t, db, googleID); count != 0 {
+		t.Errorf("refresh_tokens rows = %d, want 0", count)
+	}
+}

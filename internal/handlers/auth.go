@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -18,6 +20,8 @@ type AuthHandler struct {
 	refreshConfig auth.RefreshTokenConfig
 	// now는 현재 시각을 반환합니다 (테스트에서 시간을 고정하기 위해 교체할 수 있음)
 	now func() time.Time
+	// verifyIDToken은 Google ID Token을 검증합니다 (테스트에서 가짜 검증 결과를 주입하기 위해 교체할 수 있음)
+	verifyIDToken func(ctx context.Context, idToken string) (*auth.GoogleIDTokenPayload, error)
 }
 
 // NewAuthHandler는 AuthHandler의 새 인스턴스를 생성합니다
@@ -26,6 +30,7 @@ func NewAuthHandler(db *sql.DB) *AuthHandler {
 		db:            db,
 		refreshConfig: auth.LoadRefreshTokenConfig(),
 		now:           time.Now,
+		verifyIDToken: auth.VerifyGoogleIDToken,
 	}
 }
 
@@ -89,12 +94,13 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Google ID Token 검증
-	payload, err := auth.VerifyGoogleIDToken(r.Context(), req.IDToken)
+	payload, err := h.verifyIDToken(r.Context(), req.IDToken)
 	if err != nil {
-		if err == auth.ErrInvalidIDToken {
+		if errors.Is(err, auth.ErrInvalidIDToken) {
 			respondError(w, http.StatusUnauthorized, ErrInvalidIDToken, "Invalid Google ID Token", nil)
 			return
 		}
+		log.Printf("[ERROR] google verify: verify id token: %v", err)
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to verify Google ID Token", nil)
 		return
 	}
@@ -102,6 +108,7 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	// 5. 트랜잭션 시작
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
+		log.Printf("[ERROR] google verify: begin transaction: %v", err)
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to start transaction", nil)
 		return
 	}
@@ -110,6 +117,7 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	// 6. Google ID로 사용자 조회
 	user, err := database.GetUserByGoogleID(r.Context(), tx, payload.GoogleID)
 	if err != nil {
+		log.Printf("[ERROR] google verify: get user: %v", err)
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get user", nil)
 		return
 	}
@@ -124,6 +132,7 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := database.CreateUser(r.Context(), tx, user); err != nil {
+			log.Printf("[ERROR] google verify: create user: %v", err)
 			respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to create user", nil)
 			return
 		}
@@ -133,18 +142,21 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	// Refresh Token 저장도 사용자 생성과 같은 트랜잭션에서 처리합니다
 	pair, err := issueSession(r.Context(), tx, user, h.refreshConfig, h.now())
 	if err != nil {
-		log.Printf("[ERROR] failed to issue session: %v", err)
+		log.Printf("[ERROR] google verify: issue session: %v", err)
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to issue session", nil)
 		return
 	}
 
 	// 9. 트랜잭션 커밋
 	if err := tx.Commit(); err != nil {
+		log.Printf("[ERROR] google verify: commit transaction: %v", err)
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to commit transaction", nil)
 		return
 	}
 
 	// 10. 응답
+	// 토큰이 담긴 응답은 어디에도 캐시되지 않게 합니다 (RFC 6749 5.1)
+	w.Header().Set("Cache-Control", "no-store")
 	respondJSON(w, http.StatusOK, GoogleVerifyResponse{
 		TokenPairResponse: *pair,
 		Token:             pair.AccessToken,
