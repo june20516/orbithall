@@ -19,7 +19,6 @@
 - **검증되지 않은 이메일 저장**: 사용자 생성 시 Google이 검증한 `payload.Email`이 아니라 요청 본문의 `req.Email`을 저장한다(`auth.go` 128행). 클라이언트가 임의의 이메일을 보낼 수 있으므로 `payload.Email`을 우선 사용하도록 고친다.
 - **`/admin/*` 에러 응답 형식 불일치**: `internal/handlers/admin.go`의 핸들러들이 `http.Error`로 평문 에러를 반환해, 명세가 정한 객체 형식(`{"error":{"code","message"}}`)과 다르다. 응답을 통일하고, 핸들러가 직접 내는 400·403·404·500의 Swagger 주석(`{string} string`)도 통일된 형식에 맞춰 갱신한다. (JWT 미들웨어가 내는 401은 이미 객체 형식이며 Swagger에도 `ErrorResponse`로 반영됨)
 - **rate limiter 키 누적**: 계열(family) 기준 rate limiter(`internal/ratelimit`)가 `sync.Map`에 키를 계속 쌓아 프로세스 수명 동안 해제되지 않는다. 기존 IP 기준 limiter와 같은 한계이며, 인스턴스를 늘리면 제한이 인스턴스별로 나뉘어 실질 한도가 배수로 늘어난다.
-- **Dockerfile air 버전 미고정**: 개발 스테이지의 `RUN go install github.com/air-verse/air@latest`가 버전을 고정하지 않아, 최신 air가 Go 1.26을 요구하게 되면 `golang:1.25-alpine` 베이스와 충돌해 `docker compose up --build`가 실패한다. air 버전을 고정한다.
 
 ### 제외
 - 신규 인증 방식 도입(비대칭 서명, DPoP 등) — 명세 9장 범위 외 항목과 동일
