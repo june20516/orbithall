@@ -30,7 +30,7 @@
 
 ## 의존성
 - 선행: 009, 010
-- 후속: 023 (보강 과제), orbithall-admin 갱신 구현
+- 후속: orbithall-admin 갱신 구현
 
 ## 배포 전 필수
 - Render 환경변수 `REFRESH_TOKEN_SECRET` 설정 (32자 이상, `JWT_SECRET`과 다른 값)
@@ -47,4 +47,9 @@
 - Access Token 클레임(typ·iss·aud·exp) 필수, HS256 고정, JWT_SECRET·REFRESH_TOKEN_SECRET 시작 시 검증
 - 리뷰 반영: 계열 폐기와 회전 경합 차단(NOT EXISTS, 유예 재반환 전 계열 폐기 확인), 회전 전 사용자 조회·토큰 발급, 동시성 테스트
 - 호환용 `token` 필드 제거, 백엔드·클라이언트 함께 배포로 전환 계획 통합
-- 후속: p9-023 (보강 과제), orbithall-admin 갱신 구현
+- 후속: orbithall-admin 갱신 구현
+
+### [2026-09-28] 리뷰 후속 과제 반영
+- 로그인: ID Token의 검증된 이메일만 사용(email_verified 필수), 사용자 생성 GetOrCreate(대상 없는 ON CONFLICT), 사용자 단위 advisory lock, 활성 세션 10개 상한
+- `/admin/*` 핸들러 에러를 객체 형식으로 통일하고 Swagger 반영
+- rate limiter 미사용 키 주기 정리, Dockerfile air·swag 버전 고정

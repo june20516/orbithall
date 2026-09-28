@@ -667,7 +667,7 @@ func (h *AdminHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if post == nil {
-		log.Printf("[ERROR] admin DeleteComment: 댓글 %d의 포스트(ID=%d)를 찾을 수 없음 (데이터 정합성 문제)", comment.ID, comment.PostID)
+		log.Printf("[ERROR] admin DeleteComment: get post: post %d of comment %d not found (data integrity)", comment.PostID, comment.ID)
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get post", nil)
 		return
 	}
