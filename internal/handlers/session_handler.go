@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -21,6 +22,14 @@ const maxSessionRequestBytes = 4 << 10 // 4KB
 const (
 	refreshRateInterval = time.Minute / 10
 	refreshRateBurst    = 10
+)
+
+// rate limiter 정리 주기와 idle 기준
+// 분당 10회·burst 10이면 토큰 버킷이 가득 차는 데 최대 1분이 걸리므로,
+// idle 30분은 버킷이 가득 찬 뒤로도 충분히 여유가 있어 정리가 제한을 느슨하게 만들지 않습니다
+const (
+	rateLimiterCleanupInterval = 10 * time.Minute
+	rateLimiterCleanupIdle     = 30 * time.Minute
 )
 
 // RefreshTokenRequest는 토큰 갱신과 로그아웃 요청 본문입니다
@@ -45,6 +54,12 @@ func NewSessionHandler(db database.DBTX) *SessionHandler {
 		limiter:       ratelimit.NewRateLimiter(rate.Every(refreshRateInterval), refreshRateBurst),
 		now:           time.Now,
 	}
+}
+
+// StartRateLimiterCleanup은 토큰 갱신 rate limiter에서 오래 쓰이지 않은 키(로그인 계열)를
+// 주기적으로 정리하는 고루틴을 시작합니다. ctx가 취소되면 고루틴이 종료됩니다
+func (h *SessionHandler) StartRateLimiterCleanup(ctx context.Context) {
+	h.limiter.StartCleanup(ctx, rateLimiterCleanupInterval, rateLimiterCleanupIdle)
 }
 
 // Refresh는 Refresh Token을 한 번 사용하고 새 Access Token과 Refresh Token을 발급합니다

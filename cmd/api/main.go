@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,6 +20,14 @@ import (
 	"golang.org/x/time/rate"
 
 	_ "github.com/june20516/orbithall/docs" // swagger docs
+)
+
+// 댓글 작성 rate limiter 정리 주기와 idle 기준
+// 분당 10회·burst 5이면 토큰 버킷이 가득 차는 데 최대 30초가 걸리므로,
+// 세션 핸들러의 토큰 갱신 limiter와 같은 주기(10분)·idle(30분)이면 충분히 여유가 있습니다
+const (
+	commentLimiterCleanupInterval = 10 * time.Minute
+	commentLimiterCleanupIdle     = 30 * time.Minute
 )
 
 // @title           Orbithall API
@@ -105,6 +114,11 @@ func run() error {
 	// 댓글 작성 제한: 10 req/min, burst 5
 	// rate.Every()를 사용하여 분당 10개 = 6초당 1개로 설정
 	createCommentLimiter := ratelimit.NewRateLimiter(rate.Every(time.Minute/10), 5)
+
+	// 오래 쓰이지 않은 IP·계열 키를 주기적으로 정리해 메모리가 계속 늘어나지 않게 합니다
+	// (서버 종료 시까지 동작하면 되므로 context.Background() 사용)
+	createCommentLimiter.StartCleanup(context.Background(), commentLimiterCleanupInterval, commentLimiterCleanupIdle)
+	sessionHandler.StartRateLimiterCleanup(context.Background())
 
 	// ============================================
 	// 라우터 설정
