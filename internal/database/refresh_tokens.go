@@ -95,6 +95,7 @@ func GetChildRefreshToken(ctx context.Context, db DBTX, parentID int64) (*models
 // 폐기되지 않은 채 남을 수 있습니다. 이 조건이 그런 토큰으로 세션이 이어지는 것을 막습니다
 //
 // 부모가 이미 사용되었거나, 폐기되었거나, 계열이 폐기되었으면 nil, nil을 반환합니다
+// 만료 판정은 호출자 책임입니다 (이 함수는 만료된 토큰도 회전합니다)
 func RotateRefreshToken(ctx context.Context, db DBTX, parentID int64, childHash []byte, childExpiresAt, now time.Time) (*models.RefreshToken, error) {
 	// INSERT ... SELECT의 SELECT 목록에 쓴 파라미터는 타입을 추론하지 못하므로 명시적으로 캐스팅합니다
 	query := `
@@ -138,6 +139,20 @@ func RevokeRefreshTokenFamily(ctx context.Context, db DBTX, familyID string, rea
 	}
 
 	return nil
+}
+
+// IsRefreshTokenFamilyRevoked는 계열에 폐기된 토큰이 하나라도 있는지 반환합니다
+// 계열 폐기와 동시에 진행된 회전으로 revoked_at이 비어 있는 토큰이 남을 수 있으므로,
+// 개별 토큰의 revoked_at만으로는 계열 폐기 여부를 판단할 수 없습니다
+func IsRefreshTokenFamilyRevoked(ctx context.Context, db DBTX, familyID string) (bool, error) {
+	query := `SELECT EXISTS (SELECT 1 FROM refresh_tokens WHERE family_id = $1 AND revoked_at IS NOT NULL)`
+
+	var revoked bool
+	if err := db.QueryRowContext(ctx, query, familyID).Scan(&revoked); err != nil {
+		return false, fmt.Errorf("failed to check refresh token family revocation: %w", err)
+	}
+
+	return revoked, nil
 }
 
 // DeleteStaleRefreshTokens는 사용자의 토큰 중 before 이전에 절대 만료되었거나 폐기된 행을 삭제합니다

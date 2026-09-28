@@ -36,6 +36,19 @@ func createTestRefreshTokenFamily(ctx context.Context, t *testing.T, tx DBTX, us
 	return token
 }
 
+// mustGetRefreshToken은 hash 값의 토큰을 조회하고, 에러가 나거나 없으면 테스트를 중단합니다
+func mustGetRefreshToken(ctx context.Context, t *testing.T, tx DBTX, hash string) *models.RefreshToken {
+	t.Helper()
+	token, err := GetRefreshTokenByHash(ctx, tx, []byte(hash))
+	if err != nil {
+		t.Fatalf("failed to get refresh token %s: %v", hash, err)
+	}
+	if token == nil {
+		t.Fatalf("expected refresh token %s to exist", hash)
+	}
+	return token
+}
+
 // TestCreateRefreshTokenFamily는 로그인 시 첫 토큰 저장을 테스트합니다
 func TestCreateRefreshTokenFamily(t *testing.T) {
 	db := testhelpers.SetupTestDB(t)
@@ -165,7 +178,7 @@ func TestRotateRefreshToken(t *testing.T) {
 		}
 
 		// Then: 부모는 사용 처리됨
-		reloaded, _ := GetRefreshTokenByHash(ctx, tx, []byte("hash-parent"))
+		reloaded := mustGetRefreshToken(ctx, t, tx, "hash-parent")
 		if reloaded.UsedAt == nil || !reloaded.UsedAt.Equal(refreshTokenTestTime) {
 			t.Errorf("parent UsedAt = %v, want %v", reloaded.UsedAt, refreshTokenTestTime)
 		}
@@ -245,7 +258,7 @@ func TestRotateRefreshToken_FamilyRevoked(t *testing.T) {
 	if err != nil || child != nil {
 		t.Errorf("expected nil, nil; got %+v, %v", child, err)
 	}
-	escaped, _ := GetRefreshTokenByHash(ctx, tx, []byte("hash-escaped"))
+	escaped := mustGetRefreshToken(ctx, t, tx, "hash-escaped")
 	if escaped.UsedAt != nil {
 		t.Errorf("expected escaped token to stay unused, got UsedAt %v", escaped.UsedAt)
 	}
@@ -308,7 +321,7 @@ func TestRevokeRefreshTokenFamily(t *testing.T) {
 
 	// Then: 계열 A의 모든 토큰은 처음 폐기 정보를 유지
 	for _, hash := range []string{"hash-a1", "hash-a2"} {
-		token, _ := GetRefreshTokenByHash(ctx, tx, []byte(hash))
+		token := mustGetRefreshToken(ctx, t, tx, hash)
 		if token.RevokedAt == nil || !token.RevokedAt.Equal(revokedAt) {
 			t.Errorf("%s RevokedAt = %v, want %v", hash, token.RevokedAt, revokedAt)
 		}
@@ -318,9 +331,46 @@ func TestRevokeRefreshTokenFamily(t *testing.T) {
 	}
 
 	// Then: 계열 B는 그대로
-	other, _ := GetRefreshTokenByHash(ctx, tx, []byte("hash-b1"))
+	other := mustGetRefreshToken(ctx, t, tx, "hash-b1")
 	if other.RevokedAt != nil {
 		t.Errorf("expected family B untouched, got RevokedAt %v", other.RevokedAt)
+	}
+}
+
+// TestIsRefreshTokenFamilyRevoked는 계열 폐기 여부 확인을 테스트합니다
+func TestIsRefreshTokenFamilyRevoked(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer Close(db)
+
+	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+	defer cleanup()
+
+	// Given: 계열 A와 별도 계열 B
+	user := createRefreshTokenTestUser(ctx, t, tx)
+	familyA := createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-check-a", refreshTokenTestTime.Add(time.Hour))
+	familyB := createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-check-b", refreshTokenTestTime.Add(time.Hour))
+
+	// When: 폐기 전 확인
+	before, err := IsRefreshTokenFamilyRevoked(ctx, tx, familyA.FamilyID)
+
+	// Then: false
+	if err != nil || before {
+		t.Errorf("expected false, nil before revoke; got %v, %v", before, err)
+	}
+
+	// When: 계열 A를 폐기한 뒤 확인
+	if err := RevokeRefreshTokenFamily(ctx, tx, familyA.FamilyID, models.RefreshTokenRevokedByLogout, refreshTokenTestTime); err != nil {
+		t.Fatalf("failed to revoke: %v", err)
+	}
+	afterA, errA := IsRefreshTokenFamilyRevoked(ctx, tx, familyA.FamilyID)
+	afterB, errB := IsRefreshTokenFamilyRevoked(ctx, tx, familyB.FamilyID)
+
+	// Then: 계열 A는 true, 계열 B는 false
+	if errA != nil || !afterA {
+		t.Errorf("expected true, nil for revoked family; got %v, %v", afterA, errA)
+	}
+	if errB != nil || afterB {
+		t.Errorf("expected false, nil for other family; got %v, %v", afterB, errB)
 	}
 }
 
@@ -332,25 +382,52 @@ func TestDeleteStaleRefreshTokens(t *testing.T) {
 	ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
 	defer cleanup()
 
-	// Given: 기준 시각 7일 전보다 오래 전에 절대 만료된 계열, 폐기된 계열, 유효한 계열
+	// Given: 기준 시각 7일 전보다 오래 전에 절대 만료된 계열, 정확히 기준 시각에 절대 만료되는 계열,
+	// 회전된 자식이 있는 폐기 계열, 유효한 계열
 	user := createRefreshTokenTestUser(ctx, t, tx)
 	cutoff := refreshTokenTestTime.Add(-7 * 24 * time.Hour)
 	createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-expired", cutoff.Add(-time.Hour))
+	createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-boundary", cutoff)
 	revoked := createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-revoked-old", refreshTokenTestTime.Add(time.Hour))
+	if _, err := RotateRefreshToken(ctx, tx, revoked.ID, []byte("hash-revoked-old-child"), refreshTokenTestTime.Add(time.Hour), cutoff.Add(-2*time.Hour)); err != nil {
+		t.Fatalf("rotation failed: %v", err)
+	}
 	if err := RevokeRefreshTokenFamily(ctx, tx, revoked.FamilyID, models.RefreshTokenRevokedByLogout, cutoff.Add(-time.Hour)); err != nil {
 		t.Fatalf("failed to revoke: %v", err)
 	}
 	createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-alive", refreshTokenTestTime.Add(time.Hour))
 
-	// When: 정리
+	// Given: 다른 사용자의 오래 전에 절대 만료된 계열
+	otherUser := &models.User{
+		Email:    "refresh-token-other@example.com",
+		Name:     "Refresh Token Other User",
+		GoogleID: "google-refresh-token-other-user",
+	}
+	if err := CreateUser(ctx, tx, otherUser); err != nil {
+		t.Fatalf("failed to create other user: %v", err)
+	}
+	createTestRefreshTokenFamily(ctx, t, tx, otherUser.ID, "hash-other-user-expired", cutoff.Add(-time.Hour))
+
+	// When: 첫 사용자의 토큰 정리
 	err := DeleteStaleRefreshTokens(ctx, tx, user.ID, cutoff)
 
-	// Then: 만료·폐기된 계열만 삭제
+	// Then: 첫 사용자의 기준 시각 이전 만료·폐기 행만 삭제되고, 경계 시각 행과 다른 사용자의 행은 남음
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	for hash, wantExists := range map[string]bool{"hash-expired": false, "hash-revoked-old": false, "hash-alive": true} {
-		token, _ := GetRefreshTokenByHash(ctx, tx, []byte(hash))
+	wantExistsByHash := map[string]bool{
+		"hash-expired":            false,
+		"hash-boundary":           true,
+		"hash-revoked-old":        false,
+		"hash-revoked-old-child":  false,
+		"hash-alive":              true,
+		"hash-other-user-expired": true,
+	}
+	for hash, wantExists := range wantExistsByHash {
+		token, err := GetRefreshTokenByHash(ctx, tx, []byte(hash))
+		if err != nil {
+			t.Fatalf("failed to get refresh token %s: %v", hash, err)
+		}
 		if (token != nil) != wantExists {
 			t.Errorf("%s exists = %v, want %v", hash, token != nil, wantExists)
 		}
