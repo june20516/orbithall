@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,9 +15,11 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// newTestSessionHandler는 현재 시각을 now로 고정한 SessionHandler를 만듭니다
+// newTestSessionHandler는 현재 시각을 now로 고정하고 명세 기본 수명 설정을 쓰는 SessionHandler를 만듭니다
+// 환경변수에 따라 수명 설정이 달라지지 않도록 설정을 직접 주입합니다
 func newTestSessionHandler(tx database.DBTX, now time.Time) *SessionHandler {
 	handler := NewSessionHandler(tx)
+	handler.refreshConfig = sessionTestConfig()
 	handler.now = func() time.Time { return now }
 	return handler
 }
@@ -92,6 +95,61 @@ func TestSessionHandler_Refresh(t *testing.T) {
 			if code := readErrorCode(t, rec); code != ErrInvalidInput {
 				t.Errorf("body %s: error.code = %q", body, code)
 			}
+		}
+	})
+
+	t.Run("본문이 4KB를 넘으면 400 INVALID_INPUT", func(t *testing.T) {
+		_, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 4KB를 넘는 refresh_token을 담은 본문
+		handler := newTestSessionHandler(tx, sessionTestTime)
+		oversizedBody := refreshTokenBody(t, "ohrt_"+strings.Repeat("a", maxSessionRequestBytes))
+
+		// When: 갱신 요청
+		rec := postSessionRequest(handler.Refresh, "/auth/refresh", oversizedBody)
+
+		// Then: 400 INVALID_INPUT
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d", rec.Code)
+		}
+		if code := readErrorCode(t, rec); code != ErrInvalidInput {
+			t.Errorf("error.code = %q", code)
+		}
+	})
+
+	t.Run("유예 시간 안에 이전 토큰으로 다시 요청하면 200과 같은 후속 토큰", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 핸들러로 한 번 갱신한 세션
+		user := createSessionTestUser(ctx, t, tx)
+		login := mustIssueSession(ctx, t, tx, user, sessionTestConfig())
+		rotatedAt := sessionTestTime.Add(time.Minute)
+		handler := newTestSessionHandler(tx, rotatedAt)
+		firstRec := postSessionRequest(handler.Refresh, "/auth/refresh", refreshTokenBody(t, login.RefreshToken))
+		if firstRec.Code != http.StatusOK {
+			t.Fatalf("first refresh status = %d, body: %s", firstRec.Code, firstRec.Body.String())
+		}
+		var firstPair TokenPairResponse
+		if err := json.Unmarshal(firstRec.Body.Bytes(), &firstPair); err != nil {
+			t.Fatalf("invalid JSON: %v", err)
+		}
+
+		// When: 10초 뒤 이전 토큰으로 다시 갱신
+		handler.now = func() time.Time { return rotatedAt.Add(10 * time.Second) }
+		rec := postSessionRequest(handler.Refresh, "/auth/refresh", refreshTokenBody(t, login.RefreshToken))
+
+		// Then: 200과 첫 갱신 응답과 같은 refresh_token
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body: %s", rec.Code, rec.Body.String())
+		}
+		var pair TokenPairResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &pair); err != nil {
+			t.Fatalf("invalid JSON: %v", err)
+		}
+		if pair.RefreshToken != firstPair.RefreshToken {
+			t.Error("expected the same refresh token as the first refresh response")
 		}
 	})
 
@@ -175,8 +233,8 @@ func TestSessionHandler_Refresh(t *testing.T) {
 		if code := readErrorCode(t, rec); code != ErrRateLimitExceeded {
 			t.Errorf("error.code = %q", code)
 		}
-		if rec.Header().Get("Retry-After") == "" {
-			t.Error("expected Retry-After header")
+		if got := rec.Header().Get("Retry-After"); got != "6" {
+			t.Errorf("Retry-After = %q, want %q", got, "6")
 		}
 	})
 }

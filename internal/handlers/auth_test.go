@@ -278,6 +278,18 @@ func TestGoogleVerify_NewUserSuccess(t *testing.T) {
 		t.Errorf("token = %q, want access_token %q", body.Token, body.AccessToken)
 	}
 
+	// Then: Refresh Token 만료는 주입한 시각 + 기본 유휴 수명(14일)
+	wantRefreshExpiresAt := googleVerifyTestTime.Add(14 * 24 * time.Hour)
+	if !body.RefreshTokenExpiresAt.Equal(wantRefreshExpiresAt) {
+		t.Errorf("refresh_token_expires_at = %v, want %v", body.RefreshTokenExpiresAt, wantRefreshExpiresAt)
+	}
+
+	// Then: Access Token 만료는 실제 현재 시각 + 168시간 근처 (발급 함수가 실제 시각을 사용함)
+	wantAccessExpiresAt := time.Now().Add(168 * time.Hour)
+	if diff := body.AccessTokenExpiresAt.Sub(wantAccessExpiresAt).Abs(); diff > time.Minute {
+		t.Errorf("access_token_expires_at = %v, want within 1m of %v", body.AccessTokenExpiresAt, wantAccessExpiresAt)
+	}
+
 	stored, err := database.GetUserByGoogleID(context.Background(), db, googleID)
 	if err != nil {
 		t.Fatalf("failed to get created user: %v", err)

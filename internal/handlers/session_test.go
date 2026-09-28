@@ -533,6 +533,46 @@ func TestRotateSession(t *testing.T) {
 		}
 		assertSessionFamilyNotRevoked(ctx, t, tx, login.RefreshToken)
 	})
+
+	t.Run("Access Token 발급 실패 시 Refresh Token을 소비하지 않는다", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 로그인 세션과 Access Token 발급이 실패하는 짧은 JWT_SECRET
+		user := createSessionTestUser(ctx, t, tx)
+		login := mustIssueSession(ctx, t, tx, user, cfg)
+		originalJWTSecret := os.Getenv("JWT_SECRET")
+		t.Setenv("JWT_SECRET", "short")
+
+		// When: R1로 회전
+		rotatedAt := sessionTestTime.Add(time.Minute)
+		_, err := rotateSession(ctx, tx, login.RefreshToken, cfg, unlimitedRefreshLimiter(), rotatedAt)
+
+		// Then: 에러이고 R1은 사용 처리되지 않았으며 후속 토큰도 없음
+		if err == nil {
+			t.Fatal("expected access token issuance error, got nil")
+		}
+		first := mustGetSessionToken(ctx, t, tx, login.RefreshToken)
+		if first.UsedAt != nil {
+			t.Error("expected R1 to remain unused")
+		}
+		child, err := database.GetChildRefreshToken(ctx, tx, first.ID)
+		if err != nil || child != nil {
+			t.Errorf("expected no child of R1, got %+v, %v", child, err)
+		}
+
+		// When: JWT_SECRET을 되돌린 뒤 같은 R1로 다시 회전
+		t.Setenv("JWT_SECRET", originalJWTSecret)
+		retried, err := rotateSession(ctx, tx, login.RefreshToken, cfg, unlimitedRefreshLimiter(), rotatedAt.Add(time.Second))
+
+		// Then: 재시도로 회전이 성공함
+		if err != nil {
+			t.Fatalf("expected retry to succeed, got: %v", err)
+		}
+		if retried.RefreshToken == login.RefreshToken {
+			t.Error("expected a new refresh token")
+		}
+	})
 }
 
 // TestRevokeSession은 로그아웃을 테스트합니다
