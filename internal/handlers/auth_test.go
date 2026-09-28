@@ -63,6 +63,9 @@ func TestGoogleVerify_MissingFields(t *testing.T) {
 			if rec.Code != http.StatusBadRequest {
 				t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
 			}
+			if code := readErrorCode(t, rec); code != ErrInvalidInput {
+				t.Errorf("error.code = %q, want %q", code, ErrInvalidInput)
+			}
 		})
 	}
 }
@@ -86,6 +89,9 @@ func TestGoogleVerify_InvalidContentType(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
 	}
+	if code := readErrorCode(t, rec); code != ErrInvalidInput {
+		t.Errorf("error.code = %q, want %q", code, ErrInvalidInput)
+	}
 }
 
 // TestGoogleVerify_InvalidJSONBody는 잘못된 JSON 형식을 테스트합니다
@@ -106,6 +112,9 @@ func TestGoogleVerify_InvalidJSONBody(t *testing.T) {
 	// Then: 400 Bad Request
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+	if code := readErrorCode(t, rec); code != ErrInvalidInput {
+		t.Errorf("error.code = %q, want %q", code, ErrInvalidInput)
 	}
 }
 
@@ -134,6 +143,9 @@ func TestGoogleVerify_InvalidGoogleToken(t *testing.T) {
 	// Then: 401 Unauthorized (Google 검증 실패)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusUnauthorized, rec.Code, rec.Body.String())
+	}
+	if code := readErrorCode(t, rec); code != ErrInvalidIDToken {
+		t.Errorf("error.code = %q, want %q", code, ErrInvalidIDToken)
 	}
 }
 
