@@ -2013,6 +2013,40 @@ func TestRotateSession(t *testing.T) {
 		}
 	})
 
+	t.Run("계열이 폐기되었으면 유예 시간 안이라도 무효", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: R1 -> R2 -> R3 회전 후 계열 폐기
+		user := createSessionTestUser(ctx, t, tx)
+		login := mustIssueSession(ctx, t, tx, user, cfg)
+		rotatedAt := sessionTestTime.Add(time.Minute)
+		second := mustRotate(ctx, t, tx, login.RefreshToken, cfg, rotatedAt)
+		third := mustRotate(ctx, t, tx, second.RefreshToken, cfg, rotatedAt.Add(time.Second))
+		first, err := database.GetRefreshTokenByHash(ctx, tx, auth.HashRefreshToken(login.RefreshToken))
+		if err != nil || first == nil {
+			t.Fatalf("failed to load first token: %+v, %v", first, err)
+		}
+		if err := database.RevokeRefreshTokenFamily(ctx, tx, first.FamilyID, models.RefreshTokenRevokedByReuse, rotatedAt.Add(2*time.Second)); err != nil {
+			t.Fatalf("failed to revoke family: %v", err)
+		}
+
+		// Given: 동시 회전으로 폐기를 빠져나간 상황 재현 (R2, R3의 폐기 표시만 지움)
+		for _, token := range []string{second.RefreshToken, third.RefreshToken} {
+			if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked_at = NULL, revoked_reason = NULL WHERE token_hash = $1`, auth.HashRefreshToken(token)); err != nil {
+				t.Fatalf("failed to clear revocation: %v", err)
+			}
+		}
+
+		// When: 유예 시간 안에 사용된 R2를 다시 제출 (후속 R3는 미사용)
+		_, err = rotateSession(ctx, tx, second.RefreshToken, cfg, unlimitedRefreshLimiter(), rotatedAt.Add(5*time.Second))
+
+		// Then: R3를 돌려주지 않고 무효 에러
+		if !errors.Is(err, errSessionInvalid) {
+			t.Errorf("expected errSessionInvalid, got: %v", err)
+		}
+	})
+
 	t.Run("유휴 만료 시각이 되면 만료 에러", func(t *testing.T) {
 		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
 		defer cleanup()
@@ -2272,6 +2306,16 @@ func rotateSession(ctx context.Context, db database.DBTX, presented string, cfg 
 // 새 토큰을 만들지 않으므로 계열이 한 줄로 유지되고, 탈취된 경우에도 나중에 후속 토큰을 쓰는 쪽에서 재사용이 탐지됩니다
 // 그 외에는 탈취로 보고 계열 전체를 폐기합니다
 func reissueWithinGrace(ctx context.Context, db database.DBTX, used *models.RefreshToken, presented string, cfg auth.RefreshTokenConfig, now time.Time) (*TokenPairResponse, error) {
+	// 계열이 폐기되었다면 유예 시간과 관계없이 무효입니다
+	// 계열 폐기와 동시에 진행된 회전으로 폐기 표시 없이 남은 토큰이 여기로 올 수 있습니다
+	familyRevoked, err := database.IsRefreshTokenFamilyRevoked(ctx, db, used.FamilyID)
+	if err != nil {
+		return nil, err
+	}
+	if familyRevoked {
+		return nil, errSessionInvalid
+	}
+
 	if now.Sub(*used.UsedAt) <= cfg.ReuseGrace {
 		child, err := database.GetChildRefreshToken(ctx, db, used.ID)
 		if err != nil {
