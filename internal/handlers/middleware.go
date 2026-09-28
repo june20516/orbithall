@@ -33,6 +33,16 @@ const (
 	ErrWrongPassword   = "WRONG_PASSWORD"    // 비밀번호 불일치
 	ErrEditTimeExpired = "EDIT_TIME_EXPIRED" // 수정 가능 시간 초과
 
+	// 어드민 인증 에러
+	ErrMissingToken        = "MISSING_TOKEN"         // Authorization 헤더 없음
+	ErrInvalidToken        = "INVALID_TOKEN"         // Access Token 형식 오류 또는 서명 불일치
+	ErrExpiredToken        = "EXPIRED_TOKEN"         // Access Token 만료
+	ErrUserNotFound        = "USER_NOT_FOUND"        // 토큰의 사용자가 존재하지 않음
+	ErrInvalidIDToken      = "INVALID_ID_TOKEN"      // Google ID Token 검증 실패
+	ErrInvalidRefreshToken = "INVALID_REFRESH_TOKEN" // Refresh Token이 없거나 폐기됨
+	ErrRefreshTokenExpired = "REFRESH_TOKEN_EXPIRED" // Refresh Token 만료
+	ErrRefreshTokenReused  = "REFRESH_TOKEN_REUSED"  // 사용된 Refresh Token 재사용 (세션 폐기됨)
+
 	// Rate limiting 에러
 	ErrRateLimitExceeded = "RATE_LIMIT_EXCEEDED" // Rate limit 초과
 

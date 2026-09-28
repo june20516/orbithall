@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -16,20 +15,21 @@ const userContextKey contextKey = "user"
 
 // JWTAuthMiddleware는 JWT 기반 인증 미들웨어입니다
 // Authorization 헤더에서 Bearer 토큰을 추출하고 검증합니다
+// 실패 시 {"error":{"code","message"}} 형식으로 응답합니다
 func JWTAuthMiddleware(db database.DBTX) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 1. Authorization 헤더 추출
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				respondWithError(w, http.StatusUnauthorized, "MISSING_TOKEN", "Authorization header is required")
+				respondError(w, http.StatusUnauthorized, ErrMissingToken, "Authorization header is required", nil)
 				return
 			}
 
 			// 2. Bearer 형식 검증
 			parts := strings.Split(authHeader, " ")
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				respondWithError(w, http.StatusUnauthorized, "INVALID_TOKEN", "Authorization header must be in format: Bearer {token}")
+				respondError(w, http.StatusUnauthorized, ErrInvalidToken, "Authorization header must be in format: Bearer {token}", nil)
 				return
 			}
 
@@ -39,23 +39,23 @@ func JWTAuthMiddleware(db database.DBTX) func(http.Handler) http.Handler {
 			claims, err := auth.ValidateJWT(tokenString)
 			if err != nil {
 				if err == auth.ErrExpiredToken {
-					respondWithError(w, http.StatusUnauthorized, "EXPIRED_TOKEN", "Token has expired")
+					respondError(w, http.StatusUnauthorized, ErrExpiredToken, "Token has expired", nil)
 					return
 				}
-				respondWithError(w, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid token")
+				respondError(w, http.StatusUnauthorized, ErrInvalidToken, "Invalid token", nil)
 				return
 			}
 
 			// 4. 사용자 조회
 			user, err := database.GetUserByID(r.Context(), db, claims.UserID)
 			if err != nil {
-				respondWithError(w, http.StatusInternalServerError, "DATABASE_ERROR", "Failed to get user")
+				respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get user", nil)
 				return
 			}
 
 			// 5. 사용자 존재 여부 확인
 			if user == nil {
-				respondWithError(w, http.StatusUnauthorized, "USER_NOT_FOUND", "User not found")
+				respondError(w, http.StatusUnauthorized, ErrUserNotFound, "User not found", nil)
 				return
 			}
 
@@ -81,14 +81,4 @@ func GetUserFromContext(ctx context.Context) *models.User {
 		return nil
 	}
 	return user
-}
-
-// respondWithError는 에러 응답을 JSON 형식으로 반환합니다
-func respondWithError(w http.ResponseWriter, statusCode int, errorCode, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(map[string]string{
-		"error":   errorCode,
-		"message": message,
-	})
 }

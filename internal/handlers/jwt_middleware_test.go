@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/june20516/orbithall/internal/auth"
 	"github.com/june20516/orbithall/internal/database"
 	"github.com/june20516/orbithall/internal/models"
@@ -217,5 +220,72 @@ func TestJWTAuthMiddleware_UserNotFound(t *testing.T) {
 	// 응답 검증
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, rr.Code)
+	}
+}
+
+// readErrorCode는 객체 형식 에러 응답 본문({"error":{"code":...}})에서 code를 꺼냅니다
+func readErrorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("error body is not in object format: %v, body: %s", err, rec.Body.String())
+	}
+	return body.Error.Code
+}
+
+// TestJWTAuthMiddleware_ErrorBody는 인증 실패 응답이 객체 형식 에러 본문인지 테스트합니다
+func TestJWTAuthMiddleware_ErrorBody(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer database.Close(db)
+
+	// 만료된 Access Token
+	expiredClaims := &auth.CustomClaims{
+		UserID:    1,
+		Email:     "expired@example.com",
+		TokenType: auth.AccessTokenType,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    auth.TokenIssuer,
+			Audience:  jwt.ClaimStrings{auth.AdminAudience},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour)),
+		},
+	}
+	expiredToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, expiredClaims).SignedString([]byte(os.Getenv("JWT_SECRET")))
+	if err != nil {
+		t.Fatalf("failed to sign expired token: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		authorization string
+		wantCode      string
+	}{
+		{name: "헤더 없음", authorization: "", wantCode: ErrMissingToken},
+		{name: "Bearer 형식 아님", authorization: "Token abc", wantCode: ErrInvalidToken},
+		{name: "만료된 토큰", authorization: "Bearer " + expiredToken, wantCode: ErrExpiredToken},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Given: 인증에 실패하는 요청
+			nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Error("next handler should not be called")
+			})
+			req := httptest.NewRequest(http.MethodGet, "/admin/test", nil)
+			if tt.authorization != "" {
+				req.Header.Set("Authorization", tt.authorization)
+			}
+			rec := httptest.NewRecorder()
+
+			// When: 미들웨어 실행
+			JWTAuthMiddleware(db)(nextHandler).ServeHTTP(rec, req)
+
+			// Then: 401과 객체 형식 에러 코드
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+			}
+			if code := readErrorCode(t, rec); code != tt.wantCode {
+				t.Errorf("error.code = %q, want %q", code, tt.wantCode)
+			}
+		})
 	}
 }
