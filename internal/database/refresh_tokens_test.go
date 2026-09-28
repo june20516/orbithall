@@ -383,7 +383,7 @@ func TestDeleteStaleRefreshTokens(t *testing.T) {
 	defer cleanup()
 
 	// Given: 기준 시각 7일 전보다 오래 전에 절대 만료된 계열, 정확히 기준 시각에 절대 만료되는 계열,
-	// 회전된 자식이 있는 폐기 계열, 유효한 계열
+	// 부모만 폐기된 채 회전된 자식이 있는 계열, 유효한 계열
 	user := createRefreshTokenTestUser(ctx, t, tx)
 	cutoff := refreshTokenTestTime.Add(-7 * 24 * time.Hour)
 	createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-expired", cutoff.Add(-time.Hour))
@@ -394,6 +394,11 @@ func TestDeleteStaleRefreshTokens(t *testing.T) {
 	}
 	if err := RevokeRefreshTokenFamily(ctx, tx, revoked.FamilyID, models.RefreshTokenRevokedByLogout, cutoff.Add(-time.Hour)); err != nil {
 		t.Fatalf("failed to revoke: %v", err)
+	}
+	// 자식이 직접 삭제되지 않고 부모 삭제의 CASCADE로만 사라지는지 보기 위해 자식의 폐기 표시를 지웁니다
+	// 자식의 절대 만료는 기준 시각 이후이므로 자식 자체는 삭제 조건에 걸리지 않습니다
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked_at = NULL, revoked_reason = NULL WHERE token_hash = $1`, []byte("hash-revoked-old-child")); err != nil {
+		t.Fatalf("failed to clear child revocation: %v", err)
 	}
 	createTestRefreshTokenFamily(ctx, t, tx, user.ID, "hash-alive", refreshTokenTestTime.Add(time.Hour))
 
@@ -411,7 +416,7 @@ func TestDeleteStaleRefreshTokens(t *testing.T) {
 	// When: 첫 사용자의 토큰 정리
 	err := DeleteStaleRefreshTokens(ctx, tx, user.ID, cutoff)
 
-	// Then: 첫 사용자의 기준 시각 이전 만료·폐기 행만 삭제되고, 경계 시각 행과 다른 사용자의 행은 남음
+	// Then: 첫 사용자의 기준 시각 이전 만료·폐기 행과 그 자식(CASCADE)만 삭제되고, 경계 시각 행과 다른 사용자의 행은 남음
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}

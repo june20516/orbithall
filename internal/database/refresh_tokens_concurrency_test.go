@@ -17,9 +17,14 @@ const lockWaitTimeout = 5 * time.Second
 // lockWaitPollInterval은 잠금 대기 여부를 확인하는 간격입니다
 const lockWaitPollInterval = 10 * time.Millisecond
 
-// setupRefreshTokenConcurrencyTest는 실제로 커밋되는 데이터를 쓰는 동시성 테스트의 DB와 고유 식별자를 준비합니다
+// concurrencyTestTimeout은 동시성 테스트 한 건의 DB 작업 전체에 거는 시간 제한입니다
+// 잠금 대기가 풀리지 않는 경우에도 테스트가 무한히 멈추지 않게 합니다
+const concurrencyTestTimeout = 30 * time.Second
+
+// setupRefreshTokenConcurrencyTest는 실제로 커밋되는 데이터를 쓰는 동시성 테스트의 DB, 시간 제한 context, 고유 식별자를 준비합니다
 // 반환하는 suffix는 사용자와 토큰 해시를 다른 실행과 겹치지 않게 만드는 데 씁니다
-func setupRefreshTokenConcurrencyTest(t *testing.T) (*sql.DB, string) {
+// context 취소는 t.Cleanup으로 등록하므로, 이후 등록되는 정리 작업(트랜잭션 롤백 등)이 모두 끝난 뒤에 실행됩니다
+func setupRefreshTokenConcurrencyTest(t *testing.T) (context.Context, *sql.DB, string) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping refresh token concurrency test in short mode")
@@ -28,7 +33,23 @@ func setupRefreshTokenConcurrencyTest(t *testing.T) (*sql.DB, string) {
 	db := testhelpers.SetupTestDB(t)
 	t.Cleanup(func() { Close(db) })
 
-	return db, fmt.Sprintf("%s-%d", t.Name(), time.Now().UnixNano())
+	ctx, cancel := context.WithTimeout(context.Background(), concurrencyTestTimeout)
+	t.Cleanup(cancel)
+
+	return ctx, db, fmt.Sprintf("%s-%d", t.Name(), time.Now().UnixNano())
+}
+
+// beginLockHoldingTx는 행 잠금을 쥘 트랜잭션을 시작하고, 테스트 종료 시 롤백하도록 등록합니다
+// 사용자를 만든 뒤에 호출하면 t.Cleanup이 역순으로 실행되므로, 테스트가 어디서 중단되어도
+// 롤백이 사용자 삭제보다 먼저 실행되어 삭제가 이 트랜잭션의 잠금에 막히지 않습니다
+func beginLockHoldingTx(ctx context.Context, t *testing.T, db *sql.DB) *sql.Tx {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin transaction A: %v", err)
+	}
+	t.Cleanup(func() { tx.Rollback() })
+	return tx
 }
 
 // createCommittedRefreshTokenTestUser는 커밋되는 테스트 사용자를 만들고, 테스트 종료 시 삭제합니다
@@ -113,8 +134,7 @@ type rotateResult struct {
 // TestRotateRefreshToken_ConcurrentDoubleRotation은 서로 다른 연결에서 같은 토큰을 동시에 회전할 때
 // 한 요청만 성공하는지 테스트합니다
 func TestRotateRefreshToken_ConcurrentDoubleRotation(t *testing.T) {
-	db, suffix := setupRefreshTokenConcurrencyTest(t)
-	ctx := context.Background()
+	ctx, db, suffix := setupRefreshTokenConcurrencyTest(t)
 
 	// Given: 커밋된 첫 토큰 P
 	user := createCommittedRefreshTokenTestUser(ctx, t, db, suffix)
@@ -122,13 +142,9 @@ func TestRotateRefreshToken_ConcurrentDoubleRotation(t *testing.T) {
 	parent := createTestRefreshTokenFamily(ctx, t, db, user.ID, "hash-double-parent-"+suffix, familyExpiresAt)
 
 	// Given: 트랜잭션 A가 P를 회전하고 커밋하지 않은 채 P의 행 잠금을 보유
-	txA, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("failed to begin transaction A: %v", err)
-	}
+	txA := beginLockHoldingTx(ctx, t, db)
 	firstChild, err := RotateRefreshToken(ctx, txA, parent.ID, []byte("hash-double-child-a-"+suffix), familyExpiresAt, refreshTokenTestTime)
 	if err != nil || firstChild == nil {
-		txA.Rollback()
 		t.Fatalf("expected rotation in A to succeed, got %+v, %v", firstChild, err)
 	}
 
@@ -166,8 +182,7 @@ func TestRotateRefreshToken_ConcurrentDoubleRotation(t *testing.T) {
 // TestRotateRefreshToken_ConcurrentRevokeAndRotate는 회전이 진행 중일 때 계열 폐기가 실행되면
 // 폐기를 빠져나간 후속 토큰이 남더라도 그 토큰으로는 회전되지 않는지 테스트합니다
 func TestRotateRefreshToken_ConcurrentRevokeAndRotate(t *testing.T) {
-	db, suffix := setupRefreshTokenConcurrencyTest(t)
-	ctx := context.Background()
+	ctx, db, suffix := setupRefreshTokenConcurrencyTest(t)
 
 	// Given: 커밋된 첫 토큰 P
 	user := createCommittedRefreshTokenTestUser(ctx, t, db, suffix)
@@ -175,14 +190,10 @@ func TestRotateRefreshToken_ConcurrentRevokeAndRotate(t *testing.T) {
 	parent := createTestRefreshTokenFamily(ctx, t, db, user.ID, "hash-race-parent-"+suffix, familyExpiresAt)
 
 	// Given: 트랜잭션 A가 P를 회전해 자식 C를 만들고 커밋하지 않은 채 P의 행 잠금을 보유
-	txA, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("failed to begin transaction A: %v", err)
-	}
+	txA := beginLockHoldingTx(ctx, t, db)
 	childHash := "hash-race-child-" + suffix
 	child, err := RotateRefreshToken(ctx, txA, parent.ID, []byte(childHash), familyExpiresAt, refreshTokenTestTime)
 	if err != nil || child == nil {
-		txA.Rollback()
 		t.Fatalf("expected rotation in A to succeed, got %+v, %v", child, err)
 	}
 
