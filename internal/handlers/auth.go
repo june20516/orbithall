@@ -35,7 +35,8 @@ func NewAuthHandler(db *sql.DB) *AuthHandler {
 }
 
 // GoogleVerifyRequest는 Google ID Token 검증 요청 본문입니다
-// id_token만 필수입니다. email·name·picture는 선택이며, 서버는 ID Token의 검증된 값을 우선 사용합니다
+// id_token만 필수입니다. email·name·picture는 선택입니다
+// email은 쓰지 않고 항상 ID Token의 검증된 이메일을 저장하며, name·picture는 ID Token에 없을 때만 씁니다
 type GoogleVerifyRequest struct {
 	// IDToken은 Google이 발급한 ID Token입니다 (필수)
 	IDToken string `json:"id_token"`
@@ -58,7 +59,8 @@ type GoogleVerifyResponse struct {
 //
 // @Summary      Google OAuth 인증 및 토큰 발급
 // @Description  Google ID Token을 검증하고 사용자를 생성/조회한 후 Access Token과 Refresh Token을 발급합니다
-// @Description  id_token만 필수입니다. email·name·picture는 선택이며, 서버는 ID Token의 검증된 값을 우선 사용합니다
+// @Description  id_token만 필수입니다. email·name·picture는 선택입니다
+// @Description  email은 쓰지 않고 항상 ID Token의 검증된 이메일을 저장하며, name·picture는 ID Token에 없을 때만 씁니다
 // @Description  이메일이 검증되지 않은(email_verified가 true가 아닌) ID Token은 401 INVALID_ID_TOKEN입니다
 // @Tags         auth
 // @Accept       json
@@ -152,12 +154,17 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// maxUserNameLength는 users.name 컬럼(VARCHAR(100))에 저장할 수 있는 최대 글자 수입니다
+// PostgreSQL VARCHAR 길이는 바이트가 아니라 글자 수 기준이므로 룬(rune) 단위로 셉니다
+const maxUserNameLength = 100
+
 // newUserFromGoogle은 처음 로그인한 사용자를 생성할 때 쓸 사용자 정보를 만듭니다
 // 이메일은 Google이 검증한 ID Token 값만 씁니다. 요청 본문은 클라이언트가 임의로 바꿀 수 있기 때문입니다
 // 이름과 사진은 ID Token 값을 우선 쓰고, 없으면 요청 본문 값을 씁니다
 // 이름이 둘 다 없으면 users.name이 필수이므로 이메일을 이름으로 씁니다
+// 이름은 users.name 길이 제한을 넘지 않도록 maxUserNameLength 글자로 자릅니다
 func newUserFromGoogle(payload *auth.GoogleIDTokenPayload, req GoogleVerifyRequest) *models.User {
-	name := firstNonEmpty(payload.Name, req.Name, payload.Email)
+	name := truncateRunes(firstNonEmpty(payload.Name, req.Name, payload.Email), maxUserNameLength)
 	picture := firstNonEmpty(payload.Picture, req.Picture)
 
 	return &models.User{
@@ -176,4 +183,14 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// truncateRunes는 value가 maxRunes 글자를 넘으면 앞 maxRunes 글자만 남깁니다
+// 바이트가 아니라 룬(rune) 단위로 자르므로 한글 같은 멀티바이트 문자가 중간에서 깨지지 않습니다
+func truncateRunes(value string, maxRunes int) string {
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes])
 }

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/june20516/orbithall/internal/auth"
 	"github.com/june20516/orbithall/internal/database"
@@ -494,6 +495,47 @@ func TestGoogleVerify_UsesVerifiedClaims(t *testing.T) {
 		stored := mustGetUserByGoogleID(t, db, googleID)
 		if stored.Name != email {
 			t.Errorf("Name = %q, want %q", stored.Name, email)
+		}
+	})
+
+	t.Run("100자를 넘는 이름은 룬 기준 100자로 잘라 저장한다", func(t *testing.T) {
+		// Given: 멀티바이트 문자 150자로 된 이름의 payload
+		googleID, email := newGoogleVerifyTestIdentity(t, db)
+		longName := strings.Repeat("가", 150)
+		handler := newGoogleVerifyTestHandlerWithPayload(db, auth.GoogleIDTokenPayload{GoogleID: googleID, Email: email, Name: longName})
+
+		// When: 로그인
+		rec := callGoogleVerifyWithBody(t, handler, map[string]interface{}{"id_token": "fake-google-id-token"})
+
+		// Then: 이름이 앞 100자로 잘려 저장됨
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+		stored := mustGetUserByGoogleID(t, db, googleID)
+		if want := strings.Repeat("가", maxUserNameLength); stored.Name != want {
+			t.Errorf("Name = %q (%d runes), want %d runes of the original", stored.Name, utf8.RuneCountInString(stored.Name), maxUserNameLength)
+		}
+	})
+
+	t.Run("이름 대신 쓰는 이메일이 100자를 넘으면 룬 기준 100자로 잘라 저장한다", func(t *testing.T) {
+		// Given: 이름이 없고 100자를 넘는 이메일의 payload
+		googleID, email := newGoogleVerifyTestIdentity(t, db)
+		longEmail := strings.Repeat("a", 120) + email
+		handler := newGoogleVerifyTestHandlerWithPayload(db, auth.GoogleIDTokenPayload{GoogleID: googleID, Email: longEmail})
+
+		// When: 이름 없는 요청으로 로그인
+		rec := callGoogleVerifyWithBody(t, handler, map[string]interface{}{"id_token": "fake-google-id-token"})
+
+		// Then: 이메일은 그대로, 이름은 이메일의 앞 100자로 저장됨
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+		stored := mustGetUserByGoogleID(t, db, googleID)
+		if stored.Email != longEmail {
+			t.Errorf("Email = %q, want %q", stored.Email, longEmail)
+		}
+		if want := longEmail[:maxUserNameLength]; stored.Name != want {
+			t.Errorf("Name = %q, want %q", stored.Name, want)
 		}
 	})
 }

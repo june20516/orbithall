@@ -90,7 +90,7 @@ POST /auth/google/verify
 Content-Type: application/json
 ```
 
-**요청** (형식 변경 없음)
+**요청** (필드 구성은 기존과 같고, `id_token` 외에는 선택)
 ```json
 {
   "id_token": "<Google ID Token>",
@@ -99,7 +99,9 @@ Content-Type: application/json
   "picture": "https://..."
 }
 ```
-- `id_token`만 필수다. `email`·`name`·`picture`는 선택이며 서버는 ID Token의 검증된 값을 우선 사용한다. 검증되지 않은 이메일의 ID Token은 401 `INVALID_ID_TOKEN`이다.
+- `id_token`만 필수다. `email`·`name`·`picture`는 선택이다.
+- `email`은 사용하지 않는다(항상 ID Token의 검증된 이메일을 저장한다). `name`·`picture`는 ID Token에 없을 때만 사용한다. 이름은 100자를 넘으면 앞 100자로 잘라 저장한다.
+- 검증되지 않은 이메일의 ID Token은 401 `INVALID_ID_TOKEN`이다.
 
 **응답 200**
 ```json
@@ -378,6 +380,7 @@ CREATE UNIQUE INDEX idx_refresh_tokens_parent_id ON refresh_tokens(parent_id) WH
 
 - 로그인 응답에 기존 `token` 필드가 없다. 클라이언트가 바뀌기 전에 백엔드가 먼저 배포되면, 그 사이에는 로그인이 실패한다.
 - 기존 Access Token은 클레임이 없어 배포 즉시 `INVALID_TOKEN`으로 거부된다. 로그인해 있던 사용자는 다시 로그인해야 한다.
+- 이메일이 검증되지 않은(`email_verified`가 true가 아닌) Google 계정은 배포 후 로그인이 401 `INVALID_ID_TOKEN`으로 거부된다(이전에는 로그인할 수 있었다).
 
 ---
 

@@ -170,7 +170,9 @@ POST /auth/logout          # Refresh Token이 속한 세션 폐기 (204)
   "name": "사용자 이름"
 }
 ```
-`id_token`만 필수이며, `email`·`name`은 선택입니다. 서버는 ID Token의 검증된 이메일·이름·사진을 우선 사용하고, 이메일이 검증되지 않은 ID Token은 401 `INVALID_ID_TOKEN`으로 거부합니다.
+`id_token`만 필수이며, `email`·`name`·`picture`는 선택입니다. `email`은 사용하지 않고 항상 ID Token의 검증된 이메일을 저장하며, `name`·`picture`는 ID Token에 없을 때만 사용합니다.
+
+이메일이 검증되지 않은 Google 계정은 401 `INVALID_ID_TOKEN`으로 로그인이 거부됩니다(이전 버전에서는 로그인할 수 있었으므로 배포 시 행동 변경입니다).
 
 로그인·갱신 응답의 토큰 필드:
 ```json
