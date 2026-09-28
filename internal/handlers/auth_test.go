@@ -495,3 +495,35 @@ func TestGoogleVerify_UsesVerifiedClaims(t *testing.T) {
 		}
 	})
 }
+
+// TestGoogleVerify_EmailTakenByOtherGoogleAccount는 다른 Google 계정이 이미 쓰는 이메일로 첫 로그인하면 500을 반환하는지 테스트합니다
+func TestGoogleVerify_EmailTakenByOtherGoogleAccount(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping committed login test in short mode")
+	}
+	db := testhelpers.SetupTestDB(t)
+	t.Cleanup(func() { database.Close(db) })
+
+	// Given: 같은 이메일을 쓰는 다른 Google 계정의 사용자
+	ownerGoogleID, email := newGoogleVerifyTestIdentity(t, db)
+	owner := &models.User{Email: email, Name: "Owner", GoogleID: ownerGoogleID}
+	if err := database.CreateUser(context.Background(), db, owner); err != nil {
+		t.Fatalf("failed to create owner: %v", err)
+	}
+	otherGoogleID, _ := newGoogleVerifyTestIdentity(t, db)
+	handler := newGoogleVerifyTestHandler(db, otherGoogleID, email)
+
+	// When: 다른 Google 계정으로 첫 로그인
+	rec := callGoogleVerify(t, handler, email)
+
+	// Then: 500이고 새 사용자는 생기지 않음
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusInternalServerError, rec.Code, rec.Body.String())
+	}
+	if code := readErrorCode(t, rec); code != ErrInternalServer {
+		t.Errorf("error.code = %q, want %q", code, ErrInternalServer)
+	}
+	if count := countUsersByGoogleID(t, db, otherGoogleID); count != 0 {
+		t.Errorf("users rows = %d, want 0", count)
+	}
+}

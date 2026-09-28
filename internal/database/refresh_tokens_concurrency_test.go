@@ -21,13 +21,13 @@ const lockWaitPollInterval = 10 * time.Millisecond
 // 잠금 대기가 풀리지 않는 경우에도 테스트가 무한히 멈추지 않게 합니다
 const concurrencyTestTimeout = 30 * time.Second
 
-// setupRefreshTokenConcurrencyTest는 실제로 커밋되는 데이터를 쓰는 동시성 테스트의 DB, 시간 제한 context, 고유 식별자를 준비합니다
+// setupConcurrencyTest는 실제로 커밋되는 데이터를 쓰는 동시성 테스트의 DB, 시간 제한 context, 고유 식별자를 준비합니다
 // 반환하는 suffix는 사용자와 토큰 해시를 다른 실행과 겹치지 않게 만드는 데 씁니다
 // context 취소는 t.Cleanup으로 등록하므로, 이후 등록되는 정리 작업(트랜잭션 롤백 등)이 모두 끝난 뒤에 실행됩니다
-func setupRefreshTokenConcurrencyTest(t *testing.T) (context.Context, *sql.DB, string) {
+func setupConcurrencyTest(t *testing.T) (context.Context, *sql.DB, string) {
 	t.Helper()
 	if testing.Short() {
-		t.Skip("skipping refresh token concurrency test in short mode")
+		t.Skip("skipping concurrency test in short mode")
 	}
 
 	db := testhelpers.SetupTestDB(t)
@@ -87,9 +87,9 @@ func openDedicatedConn(ctx context.Context, t *testing.T, db *sql.DB) (*sql.Conn
 	return conn, pid
 }
 
-// waitForLockWait는 pid 세션이 refresh_tokens 쿼리를 실행하면서 잠금을 기다리는 상태가 될 때까지 폴링합니다
+// waitForLockWait는 pid 세션이 table 테이블에 대한 쿼리를 실행하면서 잠금을 기다리는 상태가 될 때까지 폴링합니다
 // lockWaitTimeout 안에 대기 상태가 되지 않으면 테스트를 중단합니다
-func waitForLockWait(ctx context.Context, t *testing.T, db *sql.DB, pid int) {
+func waitForLockWait(ctx context.Context, t *testing.T, db *sql.DB, pid int, table string) {
 	t.Helper()
 	query := `
 		SELECT EXISTS (
@@ -97,14 +97,14 @@ func waitForLockWait(ctx context.Context, t *testing.T, db *sql.DB, pid int) {
 			WHERE pid = $1
 				AND datname = current_database()
 				AND wait_event_type = 'Lock'
-				AND query ILIKE '%refresh_tokens%'
+				AND query ILIKE '%' || $2 || '%'
 		)
 	`
 
 	deadline := time.Now().Add(lockWaitTimeout)
 	for time.Now().Before(deadline) {
 		var waiting bool
-		if err := db.QueryRowContext(ctx, query, pid).Scan(&waiting); err != nil {
+		if err := db.QueryRowContext(ctx, query, pid, table).Scan(&waiting); err != nil {
 			t.Fatalf("failed to poll pg_stat_activity: %v", err)
 		}
 		if waiting {
@@ -134,7 +134,7 @@ type rotateResult struct {
 // TestRotateRefreshToken_ConcurrentDoubleRotation은 서로 다른 연결에서 같은 토큰을 동시에 회전할 때
 // 한 요청만 성공하는지 테스트합니다
 func TestRotateRefreshToken_ConcurrentDoubleRotation(t *testing.T) {
-	ctx, db, suffix := setupRefreshTokenConcurrencyTest(t)
+	ctx, db, suffix := setupConcurrencyTest(t)
 
 	// Given: 커밋된 첫 토큰 P
 	user := createCommittedRefreshTokenTestUser(ctx, t, db, suffix)
@@ -164,7 +164,7 @@ func TestRotateRefreshToken_ConcurrentDoubleRotation(t *testing.T) {
 		<-doneB
 	}()
 
-	waitForLockWait(ctx, t, db, pidB)
+	waitForLockWait(ctx, t, db, pidB, "refresh_tokens")
 	if err := txA.Commit(); err != nil {
 		t.Fatalf("failed to commit transaction A: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestRotateRefreshToken_ConcurrentDoubleRotation(t *testing.T) {
 // TestRotateRefreshToken_ConcurrentRevokeAndRotate는 회전이 진행 중일 때 계열 폐기가 실행되면
 // 폐기를 빠져나간 후속 토큰이 남더라도 그 토큰으로는 회전되지 않는지 테스트합니다
 func TestRotateRefreshToken_ConcurrentRevokeAndRotate(t *testing.T) {
-	ctx, db, suffix := setupRefreshTokenConcurrencyTest(t)
+	ctx, db, suffix := setupConcurrencyTest(t)
 
 	// Given: 커밋된 첫 토큰 P
 	user := createCommittedRefreshTokenTestUser(ctx, t, db, suffix)
@@ -212,7 +212,7 @@ func TestRotateRefreshToken_ConcurrentRevokeAndRotate(t *testing.T) {
 		<-doneB
 	}()
 
-	waitForLockWait(ctx, t, db, pidB)
+	waitForLockWait(ctx, t, db, pidB, "refresh_tokens")
 	if err := txA.Commit(); err != nil {
 		t.Fatalf("failed to commit transaction A: %v", err)
 	}

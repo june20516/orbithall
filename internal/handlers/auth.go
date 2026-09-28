@@ -111,26 +111,17 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// 6. Google ID로 사용자 조회
-	user, err := database.GetUserByGoogleID(r.Context(), tx, payload.GoogleID)
+	// 6. Google ID로 사용자 조회, 없으면 생성
+	// 같은 사용자의 첫 로그인이 동시에 들어와도 한쪽이 실패하지 않도록 조회·생성을 한 번에 처리합니다
+	// 다른 Google 계정이 같은 이메일을 이미 쓰고 있으면 이메일 UNIQUE 제약 위반으로 에러가 납니다
+	user, err := database.GetOrCreateUserByGoogleID(r.Context(), tx, newUserFromGoogle(payload, req))
 	if err != nil {
-		log.Printf("[ERROR] google verify: get user: %v", err)
-		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get user", nil)
+		log.Printf("[ERROR] google verify: get or create user (google_id=%s): %v", payload.GoogleID, err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get or create user", nil)
 		return
 	}
 
-	// 7. 사용자가 없으면 생성
-	if user == nil {
-		user = newUserFromGoogle(payload, req)
-
-		if err := database.CreateUser(r.Context(), tx, user); err != nil {
-			log.Printf("[ERROR] google verify: create user: %v", err)
-			respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to create user", nil)
-			return
-		}
-	}
-
-	// 8. 세션 발급 (Access Token + Refresh Token)
+	// 7. 세션 발급 (Access Token + Refresh Token)
 	// Refresh Token 저장도 사용자 생성과 같은 트랜잭션에서 처리합니다
 	pair, err := issueSession(r.Context(), tx, user, h.refreshConfig, h.now())
 	if err != nil {
@@ -139,14 +130,14 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 9. 트랜잭션 커밋
+	// 8. 트랜잭션 커밋
 	if err := tx.Commit(); err != nil {
 		log.Printf("[ERROR] google verify: commit transaction: %v", err)
 		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to commit transaction", nil)
 		return
 	}
 
-	// 10. 응답
+	// 9. 응답
 	// 토큰이 담긴 응답은 어디에도 캐시되지 않게 합니다 (RFC 6749 5.1)
 	w.Header().Set("Cache-Control", "no-store")
 	respondJSON(w, http.StatusOK, GoogleVerifyResponse{
@@ -155,7 +146,7 @@ func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// newUserFromGoogle은 신규 사용자 정보를 만듭니다
+// newUserFromGoogle은 처음 로그인한 사용자를 생성할 때 쓸 사용자 정보를 만듭니다
 // 이메일은 Google이 검증한 ID Token 값만 씁니다. 요청 본문은 클라이언트가 임의로 바꿀 수 있기 때문입니다
 // 이름과 사진은 ID Token 값을 우선 쓰고, 없으면 요청 본문 값을 씁니다
 // 이름이 둘 다 없으면 users.name이 필수이므로 이메일을 이름으로 씁니다
