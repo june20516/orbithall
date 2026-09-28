@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -37,22 +38,23 @@ type ListSitesResponse struct {
 // @Accept       json
 // @Produce      json
 // @Success      200 {object} ListSitesResponse
-// @Failure      401 {string} string "Unauthorized"
-// @Failure      500 {string} string "Failed to get sites"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
+// @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Security     BearerAuth
 // @Router       /admin/sites [get]
 func (h *AdminHandler) ListSites(w http.ResponseWriter, r *http.Request) {
 	// Context에서 사용자 추출
 	user, ok := r.Context().Value(userContextKey).(*models.User)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, ErrUnauthorized, "Unauthorized", nil)
 		return
 	}
 
 	// 사용자의 사이트 목록 조회
 	sites, err := database.GetUserSites(r.Context(), h.db, user.ID)
 	if err != nil {
-		http.Error(w, "Failed to get sites", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin ListSites: 사이트 목록 조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get sites", nil)
 		return
 	}
 
@@ -70,17 +72,17 @@ func (h *AdminHandler) ListSites(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        id  path     int  true  "Site ID"
 // @Success      200 {object} models.Site
-// @Failure      400 {string} string "Invalid site ID"
-// @Failure      401 {string} string "Unauthorized"
-// @Failure      404 {string} string "Site not found"
-// @Failure      500 {string} string "Failed to get site"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
+// @Failure      404 {object} ErrorResponse "SITE_NOT_FOUND"
+// @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Security     BearerAuth
 // @Router       /admin/sites/{id} [get]
 func (h *AdminHandler) GetSite(w http.ResponseWriter, r *http.Request) {
 	// Context에서 사용자 추출
 	user, ok := r.Context().Value(userContextKey).(*models.User)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, ErrUnauthorized, "Unauthorized", nil)
 		return
 	}
 
@@ -88,7 +90,7 @@ func (h *AdminHandler) GetSite(w http.ResponseWriter, r *http.Request) {
 	siteIDStr := chi.URLParam(r, "id")
 	siteID, err := strconv.ParseInt(siteIDStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid site ID", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid site ID", nil)
 		return
 	}
 
@@ -96,22 +98,24 @@ func (h *AdminHandler) GetSite(w http.ResponseWriter, r *http.Request) {
 	site, err := database.GetSiteByID(r.Context(), h.db, siteID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Site not found", http.StatusNotFound)
+			respondError(w, http.StatusNotFound, ErrSiteNotFound, "Site not found", nil)
 			return
 		}
-		http.Error(w, "Failed to get site", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin GetSite: 사이트 조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get site", nil)
 		return
 	}
 
 	// 접근 권한 확인
 	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, siteID)
 	if err != nil {
-		http.Error(w, "Failed to check access", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin GetSite: 접근 권한 확인: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to check access", nil)
 		return
 	}
 
 	if !hasAccess {
-		http.Error(w, "Site not found", http.StatusNotFound)
+		respondError(w, http.StatusNotFound, ErrSiteNotFound, "Site not found", nil)
 		return
 	}
 
@@ -129,39 +133,35 @@ func (h *AdminHandler) GetSite(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        site body validators.SiteCreateInput true "사이트 생성 정보"
 // @Success      201 {object} models.Site
-// @Failure      400 {object} map[string]interface{} "Invalid input"
-// @Failure      401 {string} string "Unauthorized"
-// @Failure      500 {string} string "Failed to create site"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT (검증 실패 시 details에 필드별 메시지)"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
+// @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Security     BearerAuth
 // @Router       /admin/sites [post]
 func (h *AdminHandler) CreateSite(w http.ResponseWriter, r *http.Request) {
 	// Context에서 사용자 추출
 	user, ok := r.Context().Value(userContextKey).(*models.User)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, ErrUnauthorized, "Unauthorized", nil)
 		return
 	}
 
 	// Content-Type 검증
 	if r.Header.Get("Content-Type") != "application/json" {
-		http.Error(w, "Content-Type must be application/json", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Content-Type must be application/json", nil)
 		return
 	}
 
 	// JSON 요청 파싱
 	var input validators.SiteCreateInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid JSON", nil)
 		return
 	}
 
 	// 입력 검증
 	if err := input.Validate(); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-		})
+		respondValidationError(w, err)
 		return
 	}
 
@@ -175,7 +175,8 @@ func (h *AdminHandler) CreateSite(w http.ResponseWriter, r *http.Request) {
 
 	err := database.CreateSiteForUser(r.Context(), h.db, site, user.ID)
 	if err != nil {
-		http.Error(w, "Failed to create site", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin CreateSite: 사이트 생성: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to create site", nil)
 		return
 	}
 
@@ -194,18 +195,18 @@ func (h *AdminHandler) CreateSite(w http.ResponseWriter, r *http.Request) {
 // @Param        id   path     int  true  "Site ID"
 // @Param        site body validators.SiteUpdateInput true "사이트 수정 정보"
 // @Success      200 {object} models.Site
-// @Failure      400 {object} map[string]interface{} "Invalid input"
-// @Failure      401 {string} string "Unauthorized"
-// @Failure      403 {string} string "Forbidden"
-// @Failure      404 {string} string "Site not found"
-// @Failure      500 {string} string "Failed to update site"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT (검증 실패 시 details에 필드별 메시지)"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
+// @Failure      403 {object} ErrorResponse "FORBIDDEN"
+// @Failure      404 {object} ErrorResponse "SITE_NOT_FOUND"
+// @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Security     BearerAuth
 // @Router       /admin/sites/{id} [put]
 func (h *AdminHandler) UpdateSite(w http.ResponseWriter, r *http.Request) {
 	// Context에서 사용자 추출
 	user, ok := r.Context().Value(userContextKey).(*models.User)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, ErrUnauthorized, "Unauthorized", nil)
 		return
 	}
 
@@ -213,42 +214,39 @@ func (h *AdminHandler) UpdateSite(w http.ResponseWriter, r *http.Request) {
 	siteIDStr := chi.URLParam(r, "id")
 	siteID, err := strconv.ParseInt(siteIDStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid site ID", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid site ID", nil)
 		return
 	}
 
 	// Content-Type 검증
 	if r.Header.Get("Content-Type") != "application/json" {
-		http.Error(w, "Content-Type must be application/json", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Content-Type must be application/json", nil)
 		return
 	}
 
 	// JSON 요청 파싱
 	var input validators.SiteUpdateInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid JSON", nil)
 		return
 	}
 
 	// 입력 검증
 	if err := input.Validate(); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-		})
+		respondValidationError(w, err)
 		return
 	}
 
 	// 접근 권한 확인
 	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, siteID)
 	if err != nil {
-		http.Error(w, "Failed to check access", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin UpdateSite: 접근 권한 확인: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to check access", nil)
 		return
 	}
 
 	if !hasAccess {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		respondError(w, http.StatusForbidden, ErrForbidden, "Forbidden", nil)
 		return
 	}
 
@@ -256,10 +254,11 @@ func (h *AdminHandler) UpdateSite(w http.ResponseWriter, r *http.Request) {
 	site, err := database.GetSiteByID(r.Context(), h.db, siteID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Site not found", http.StatusNotFound)
+			respondError(w, http.StatusNotFound, ErrSiteNotFound, "Site not found", nil)
 			return
 		}
-		http.Error(w, "Failed to get site", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin UpdateSite: 사이트 조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get site", nil)
 		return
 	}
 
@@ -282,17 +281,19 @@ func (h *AdminHandler) UpdateSite(w http.ResponseWriter, r *http.Request) {
 	err = database.UpdateSite(r.Context(), h.db, siteID, name, corsOrigins, isActive)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Site not found", http.StatusNotFound)
+			respondError(w, http.StatusNotFound, ErrSiteNotFound, "Site not found", nil)
 			return
 		}
-		http.Error(w, "Failed to update site", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin UpdateSite: 사이트 수정: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to update site", nil)
 		return
 	}
 
 	// 수정된 사이트 재조회
 	updatedSite, err := database.GetSiteByID(r.Context(), h.db, siteID)
 	if err != nil {
-		http.Error(w, "Failed to get updated site", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin UpdateSite: 수정된 사이트 재조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get updated site", nil)
 		return
 	}
 
@@ -310,18 +311,18 @@ func (h *AdminHandler) UpdateSite(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        id path int true "Site ID"
 // @Success      204 "No Content"
-// @Failure      400 {string} string "Invalid site ID"
-// @Failure      401 {string} string "Unauthorized"
-// @Failure      403 {string} string "Forbidden"
-// @Failure      404 {string} string "Site not found"
-// @Failure      500 {string} string "Failed to delete site"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
+// @Failure      403 {object} ErrorResponse "FORBIDDEN"
+// @Failure      404 {object} ErrorResponse "SITE_NOT_FOUND"
+// @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Security     BearerAuth
 // @Router       /admin/sites/{id} [delete]
 func (h *AdminHandler) DeleteSite(w http.ResponseWriter, r *http.Request) {
 	// Context에서 사용자 추출
 	user, ok := r.Context().Value(userContextKey).(*models.User)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, ErrUnauthorized, "Unauthorized", nil)
 		return
 	}
 
@@ -329,19 +330,20 @@ func (h *AdminHandler) DeleteSite(w http.ResponseWriter, r *http.Request) {
 	siteIDStr := chi.URLParam(r, "id")
 	siteID, err := strconv.ParseInt(siteIDStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid site ID", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid site ID", nil)
 		return
 	}
 
 	// 접근 권한 확인
 	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, siteID)
 	if err != nil {
-		http.Error(w, "Failed to check access", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin DeleteSite: 접근 권한 확인: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to check access", nil)
 		return
 	}
 
 	if !hasAccess {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		respondError(w, http.StatusForbidden, ErrForbidden, "Forbidden", nil)
 		return
 	}
 
@@ -349,10 +351,11 @@ func (h *AdminHandler) DeleteSite(w http.ResponseWriter, r *http.Request) {
 	err = database.DeleteSite(r.Context(), h.db, siteID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Site not found", http.StatusNotFound)
+			respondError(w, http.StatusNotFound, ErrSiteNotFound, "Site not found", nil)
 			return
 		}
-		http.Error(w, "Failed to delete site", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin DeleteSite: 사이트 삭제: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to delete site", nil)
 		return
 	}
 
@@ -367,14 +370,14 @@ func (h *AdminHandler) DeleteSite(w http.ResponseWriter, r *http.Request) {
 // @Accept       json
 // @Produce      json
 // @Success      200 {object} models.User
-// @Failure      401 {string} string "Unauthorized"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
 // @Security     BearerAuth
 // @Router       /admin/profile [get]
 func (h *AdminHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	// Context에서 사용자 추출
 	user, ok := r.Context().Value(userContextKey).(*models.User)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, ErrUnauthorized, "Unauthorized", nil)
 		return
 	}
 
@@ -392,9 +395,10 @@ func (h *AdminHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        id path int true "Site ID"
 // @Success      200 {object} models.SiteStats
-// @Failure      400 {string} string "Invalid site ID"
-// @Failure      403 {string} string "Forbidden"
-// @Failure      500 {string} string "Failed to get site stats"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
+// @Failure      403 {object} ErrorResponse "FORBIDDEN"
+// @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Security     BearerAuth
 // @Router       /admin/sites/{id}/stats [get]
 func (h *AdminHandler) GetSiteStats(w http.ResponseWriter, r *http.Request) {
@@ -402,33 +406,35 @@ func (h *AdminHandler) GetSiteStats(w http.ResponseWriter, r *http.Request) {
 	siteIDStr := chi.URLParam(r, "id")
 	siteID, err := strconv.ParseInt(siteIDStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid site ID", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid site ID", nil)
 		return
 	}
 
 	// Context에서 사용자 추출
 	user, ok := r.Context().Value(userContextKey).(*models.User)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, ErrUnauthorized, "Unauthorized", nil)
 		return
 	}
 
 	// 사용자가 해당 사이트에 접근 권한이 있는지 확인
 	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, siteID)
 	if err != nil {
-		http.Error(w, "Failed to check site access", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin GetSiteStats: 접근 권한 확인: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to check site access", nil)
 		return
 	}
 
 	if !hasAccess {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		respondError(w, http.StatusForbidden, ErrForbidden, "Forbidden", nil)
 		return
 	}
 
 	// 통계 조회
 	stats, err := database.GetSiteStats(r.Context(), h.db, siteID)
 	if err != nil {
-		http.Error(w, "Failed to get site stats", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin GetSiteStats: 통계 조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get site stats", nil)
 		return
 	}
 
@@ -446,9 +452,10 @@ func (h *AdminHandler) GetSiteStats(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        id path int true "Site ID"
 // @Success      200 {array} models.Post
-// @Failure      400 {string} string "Invalid site ID"
-// @Failure      403 {string} string "Forbidden"
-// @Failure      500 {string} string "Failed to get posts"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
+// @Failure      403 {object} ErrorResponse "FORBIDDEN"
+// @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Security     BearerAuth
 // @Router       /admin/sites/{id}/posts [get]
 func (h *AdminHandler) ListSitePosts(w http.ResponseWriter, r *http.Request) {
@@ -456,33 +463,35 @@ func (h *AdminHandler) ListSitePosts(w http.ResponseWriter, r *http.Request) {
 	siteIDStr := chi.URLParam(r, "id")
 	siteID, err := strconv.ParseInt(siteIDStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid site ID", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid site ID", nil)
 		return
 	}
 
 	// Context에서 사용자 추출
 	user, ok := r.Context().Value(userContextKey).(*models.User)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, ErrUnauthorized, "Unauthorized", nil)
 		return
 	}
 
 	// 사용자가 해당 사이트에 접근 권한이 있는지 확인
 	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, siteID)
 	if err != nil {
-		http.Error(w, "Failed to check site access", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin ListSitePosts: 접근 권한 확인: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to check site access", nil)
 		return
 	}
 
 	if !hasAccess {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		respondError(w, http.StatusForbidden, ErrForbidden, "Forbidden", nil)
 		return
 	}
 
 	// 포스트 목록 조회
 	posts, err := database.ListPostsBySite(r.Context(), h.db, siteID)
 	if err != nil {
-		http.Error(w, "Failed to get posts", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin ListSitePosts: 포스트 목록 조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get posts", nil)
 		return
 	}
 
@@ -503,59 +512,62 @@ func (h *AdminHandler) ListSitePosts(w http.ResponseWriter, r *http.Request) {
 // @Param        limit query int false "댓글 개수 (기본값: 50)"
 // @Param        offset query int false "오프셋 (기본값: 0)"
 // @Success      200 {object} object{comments=[]models.Comment,total=int}
-// @Failure      400 {string} string "Invalid parameters"
-// @Failure      403 {string} string "Forbidden"
-// @Failure      404 {string} string "Post not found"
-// @Failure      500 {string} string "Failed to get comments"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
+// @Failure      403 {object} ErrorResponse "FORBIDDEN"
+// @Failure      404 {object} ErrorResponse "POST_NOT_FOUND"
+// @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Security     BearerAuth
 // @Router       /admin/posts/{slug}/comments [get]
 func (h *AdminHandler) GetPostComments(w http.ResponseWriter, r *http.Request) {
 	// URL에서 slug 추출
 	slug := chi.URLParam(r, "slug")
 	if slug == "" {
-		http.Error(w, "Post slug is required", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Post slug is required", nil)
 		return
 	}
 
 	// Query 파라미터에서 site_id 추출
 	siteIDStr := r.URL.Query().Get("site_id")
 	if siteIDStr == "" {
-		http.Error(w, "site_id query parameter is required", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "site_id query parameter is required", nil)
 		return
 	}
 	siteID, err := strconv.ParseInt(siteIDStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid site_id", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid site_id", nil)
 		return
 	}
 
 	// Context에서 사용자 추출
 	user, ok := r.Context().Value(userContextKey).(*models.User)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, ErrUnauthorized, "Unauthorized", nil)
 		return
 	}
 
 	// 사용자가 해당 사이트에 접근 권한이 있는지 확인
 	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, siteID)
 	if err != nil {
-		http.Error(w, "Failed to check site access", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin GetPostComments: 접근 권한 확인: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to check site access", nil)
 		return
 	}
 
 	if !hasAccess {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		respondError(w, http.StatusForbidden, ErrForbidden, "Forbidden", nil)
 		return
 	}
 
 	// 포스트 조회
 	post, err := database.GetPostBySlug(r.Context(), h.db, siteID, slug)
 	if err != nil {
-		http.Error(w, "Failed to get post", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin GetPostComments: 포스트 조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get post", nil)
 		return
 	}
 	if post == nil {
-		http.Error(w, "Post not found", http.StatusNotFound)
+		respondError(w, http.StatusNotFound, ErrPostNotFound, "Post not found", nil)
 		return
 	}
 
@@ -578,7 +590,8 @@ func (h *AdminHandler) GetPostComments(w http.ResponseWriter, r *http.Request) {
 	// Admin용 댓글 조회 (삭제된 것 포함, IP 마스킹 없음)
 	comments, total, err := database.GetAdminComments(r.Context(), h.db, post.ID, limit, offset)
 	if err != nil {
-		http.Error(w, "Failed to get comments", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin GetPostComments: 댓글 조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get comments", nil)
 		return
 	}
 
@@ -612,54 +625,62 @@ func (h *AdminHandler) GetPostComments(w http.ResponseWriter, r *http.Request) {
 // @Produce      plain
 // @Param        id path int true "Comment ID"
 // @Success      204 "No Content"
-// @Failure      400 {string} string "Invalid comment ID"
-// @Failure      401 {string} string "Unauthorized"
-// @Failure      403 {string} string "Forbidden"
-// @Failure      404 {string} string "Comment not found"
-// @Failure      500 {string} string "Failed to delete comment"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
+// @Failure      403 {object} ErrorResponse "FORBIDDEN"
+// @Failure      404 {object} ErrorResponse "COMMENT_NOT_FOUND"
+// @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Security     BearerAuth
 // @Router       /admin/comments/{id} [delete]
 func (h *AdminHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	// Context에서 사용자 추출
 	user, ok := r.Context().Value(userContextKey).(*models.User)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respondError(w, http.StatusUnauthorized, ErrUnauthorized, "Unauthorized", nil)
 		return
 	}
 
 	// URL 파라미터에서 comment_id 추출
 	commentID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || commentID <= 0 {
-		http.Error(w, "Invalid comment ID", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid comment ID", nil)
 		return
 	}
 
 	// 댓글 조회 (삭제된 댓글 포함)
 	comment, err := database.GetCommentByID(r.Context(), h.db, commentID)
 	if err != nil {
-		http.Error(w, "Failed to get comment", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin DeleteComment: 댓글 조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get comment", nil)
 		return
 	}
 	if comment == nil {
-		http.Error(w, "Comment not found", http.StatusNotFound)
+		respondError(w, http.StatusNotFound, ErrCommentNotFound, "Comment not found", nil)
 		return
 	}
 
 	// 댓글이 속한 사이트 확인 (댓글은 FK로 포스트에 묶여 있으므로 포스트가 없으면 서버 오류)
 	post, err := database.GetPostByID(r.Context(), h.db, comment.PostID)
-	if err != nil || post == nil {
-		http.Error(w, "Failed to get post", http.StatusInternalServerError)
+	if err != nil {
+		log.Printf("[ERROR] admin DeleteComment: 포스트 조회: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get post", nil)
+		return
+	}
+	if post == nil {
+		log.Printf("[ERROR] admin DeleteComment: get post: post %d of comment %d not found (data integrity)", comment.PostID, comment.ID)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get post", nil)
 		return
 	}
 
 	// 접근 권한 확인
 	hasAccess, err := database.HasUserSiteAccess(r.Context(), h.db, user.ID, post.SiteID)
 	if err != nil {
-		http.Error(w, "Failed to check site access", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin DeleteComment: 접근 권한 확인: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to check site access", nil)
 		return
 	}
 	if !hasAccess {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		respondError(w, http.StatusForbidden, ErrForbidden, "Forbidden", nil)
 		return
 	}
 
@@ -672,10 +693,22 @@ func (h *AdminHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	// 삭제 (동시 요청으로 먼저 삭제된 경우도 ErrCommentNotFound로 오므로 성공 처리)
 	err = database.DeleteComment(r.Context(), h.db, commentID)
 	if err != nil && !errors.Is(err, database.ErrCommentNotFound) {
-		http.Error(w, "Failed to delete comment", http.StatusInternalServerError)
+		log.Printf("[ERROR] admin DeleteComment: 댓글 삭제: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to delete comment", nil)
 		return
 	}
 
 	// 204 No Content 응답
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// respondValidationError는 입력 검증 실패를 400 INVALID_INPUT 에러로 응답합니다
+// 필드별 검증 에러(ValidationErrors)면 details에 필드별 메시지를 담고, 그 밖의 에러는 메시지를 그대로 details에 담습니다
+func respondValidationError(w http.ResponseWriter, err error) {
+	var validationErrs validators.ValidationErrors
+	if errors.As(err, &validationErrs) {
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Validation failed", validationErrs)
+		return
+	}
+	respondError(w, http.StatusBadRequest, ErrInvalidInput, "Validation failed", err.Error())
 }

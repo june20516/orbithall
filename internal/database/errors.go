@@ -23,4 +23,7 @@ var (
 
 	// ErrEditTimeExpired는 댓글 수정 가능 시간(30분)이 초과되었을 때 발생
 	ErrEditTimeExpired = errors.New("edit time expired")
+
+	// ErrEmailTaken은 사용자 생성 시 다른 Google ID의 사용자가 이미 같은 이메일을 쓰고 있을 때 발생
+	ErrEmailTaken = errors.New("email is already used by another google account")
 )

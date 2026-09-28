@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/june20516/orbithall/internal/models"
@@ -294,6 +295,115 @@ func TestGetUserByID(t *testing.T) {
 		}
 		if user != nil {
 			t.Errorf("expected nil user, got: %+v", user)
+		}
+	})
+}
+
+// TestGetOrCreateUserByGoogleID는 Google ID 기준 사용자 조회·생성을 테스트합니다
+// 서브테스트끼리 데이터가 섞이지 않도록 서브테스트마다 독립 트랜잭션을 씁니다
+func TestGetOrCreateUserByGoogleID(t *testing.T) {
+	db := testhelpers.SetupTestDB(t)
+	defer Close(db)
+
+	t.Run("없으면 새로 생성한다", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 아직 없는 Google ID의 사용자 정보
+		input := &models.User{
+			Email:      "get-or-create-new@example.com",
+			Name:       "New User",
+			PictureURL: "https://example.com/new.jpg",
+			GoogleID:   "google-get-or-create-new",
+		}
+
+		// When: GetOrCreateUserByGoogleID 호출
+		user, err := GetOrCreateUserByGoogleID(ctx, tx, input)
+
+		// Then: 입력 값으로 생성되고 ID·타임스탬프가 채워짐
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if user.ID == 0 || user.CreatedAt.IsZero() {
+			t.Errorf("expected persisted user, got %+v", user)
+		}
+		if user.Email != input.Email || user.Name != input.Name || user.PictureURL != input.PictureURL || user.GoogleID != input.GoogleID {
+			t.Errorf("user = %+v, want values of %+v", user, input)
+		}
+	})
+
+	t.Run("이미 있으면 기존 사용자를 그대로 반환한다", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 이미 저장된 사용자
+		existing := &models.User{Email: "get-or-create-existing@example.com", Name: "Existing", GoogleID: "google-get-or-create-existing"}
+		if err := CreateUser(ctx, tx, existing); err != nil {
+			t.Fatalf("failed to create existing user: %v", err)
+		}
+
+		// When: 같은 Google ID, 다른 이름으로 호출
+		user, err := GetOrCreateUserByGoogleID(ctx, tx, &models.User{
+			Email:    "get-or-create-other@example.com",
+			Name:     "Other Name",
+			GoogleID: existing.GoogleID,
+		})
+
+		// Then: 기존 사용자가 바뀌지 않고 반환됨
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if user.ID != existing.ID || user.Email != existing.Email || user.Name != existing.Name {
+			t.Errorf("user = %+v, want existing %+v", user, existing)
+		}
+	})
+
+	t.Run("두 번 호출해도 한 행만 생긴다", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 같은 사용자 정보
+		input := models.User{Email: "get-or-create-twice@example.com", Name: "Twice", GoogleID: "google-get-or-create-twice"}
+
+		// When: 두 번 호출
+		first, err := GetOrCreateUserByGoogleID(ctx, tx, &input)
+		if err != nil {
+			t.Fatalf("first call failed: %v", err)
+		}
+		second, err := GetOrCreateUserByGoogleID(ctx, tx, &input)
+		if err != nil {
+			t.Fatalf("second call failed: %v", err)
+		}
+
+		// Then: 같은 ID이고 행은 하나
+		if first.ID != second.ID {
+			t.Errorf("IDs differ: %d vs %d", first.ID, second.ID)
+		}
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE google_id = $1`, input.GoogleID).Scan(&count); err != nil {
+			t.Fatalf("failed to count users: %v", err)
+		}
+		if count != 1 {
+			t.Errorf("users rows = %d, want 1", count)
+		}
+	})
+
+	t.Run("다른 Google ID가 같은 이메일을 쓰면 ErrEmailTaken을 반환한다", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 이메일을 이미 쓰는 사용자
+		existing := &models.User{Email: "get-or-create-taken@example.com", Name: "Owner", GoogleID: "google-get-or-create-owner"}
+		if err := CreateUser(ctx, tx, existing); err != nil {
+			t.Fatalf("failed to create existing user: %v", err)
+		}
+
+		// When: 다른 Google ID로 같은 이메일 사용자 조회·생성
+		user, err := GetOrCreateUserByGoogleID(ctx, tx, &models.User{Email: existing.Email, Name: "Other", GoogleID: "google-get-or-create-other"})
+
+		// Then: 이메일 점유 에러 반환
+		if !errors.Is(err, ErrEmailTaken) {
+			t.Fatalf("expected ErrEmailTaken, got user %+v, err %v", user, err)
 		}
 	})
 }

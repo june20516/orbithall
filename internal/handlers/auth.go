@@ -1,9 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/june20516/orbithall/internal/auth"
 	"github.com/june20516/orbithall/internal/database"
@@ -12,132 +16,181 @@ import (
 
 // AuthHandler는 인증 관련 HTTP 요청을 처리합니다
 type AuthHandler struct {
-	db *sql.DB
+	db            *sql.DB
+	refreshConfig auth.RefreshTokenConfig
+	// now는 현재 시각을 반환합니다 (테스트에서 시간을 고정하기 위해 교체할 수 있음)
+	now func() time.Time
+	// verifyIDToken은 Google ID Token을 검증합니다 (테스트에서 가짜 검증 결과를 주입하기 위해 교체할 수 있음)
+	verifyIDToken func(ctx context.Context, idToken string) (*auth.GoogleIDTokenPayload, error)
 }
 
 // NewAuthHandler는 AuthHandler의 새 인스턴스를 생성합니다
 func NewAuthHandler(db *sql.DB) *AuthHandler {
 	return &AuthHandler{
-		db: db,
+		db:            db,
+		refreshConfig: auth.LoadRefreshTokenConfig(),
+		now:           time.Now,
+		verifyIDToken: auth.VerifyGoogleIDToken,
 	}
 }
 
 // GoogleVerifyRequest는 Google ID Token 검증 요청 본문입니다
+// id_token만 필수입니다. email·name·picture는 선택입니다
+// email은 쓰지 않고 항상 ID Token의 검증된 이메일을 저장하며, name·picture는 ID Token에 없을 때만 씁니다
 type GoogleVerifyRequest struct {
+	// IDToken은 Google이 발급한 ID Token입니다 (필수)
 	IDToken string `json:"id_token"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
+	// Email은 선택입니다. 저장되는 이메일은 항상 ID Token의 검증된 이메일이며 이 값은 쓰지 않습니다
+	Email string `json:"email"`
+	// Name은 선택입니다. ID Token에 이름이 없을 때만 사용합니다
+	Name string `json:"name"`
+	// Picture는 선택입니다. ID Token에 사진이 없을 때만 사용합니다
 	Picture string `json:"picture"`
 }
 
 // GoogleVerifyResponse는 Google ID Token 검증 성공 응답입니다
 type GoogleVerifyResponse struct {
-	Token string        `json:"token"`
-	User  *models.User `json:"user"`
+	TokenPairResponse
+
+	User *models.User `json:"user"`
 }
 
-// GoogleVerify는 Google ID Token을 검증하고 백엔드 JWT를 발급합니다
+// GoogleVerify는 Google ID Token을 검증하고 Access Token과 Refresh Token을 발급합니다
 //
-// @Summary      Google OAuth 인증 및 JWT 발급
-// @Description  Google ID Token을 검증하고 사용자를 생성/조회한 후 백엔드 JWT를 발급합니다
+// @Summary      Google OAuth 인증 및 토큰 발급
+// @Description  Google ID Token을 검증하고 사용자를 생성/조회한 후 Access Token과 Refresh Token을 발급합니다
+// @Description  id_token만 필수입니다. email·name·picture는 선택입니다
+// @Description  email은 쓰지 않고 항상 ID Token의 검증된 이메일을 저장하며, name·picture는 ID Token에 없을 때만 씁니다
+// @Description  이메일이 검증되지 않은(email_verified가 true가 아닌) ID Token은 401 INVALID_ID_TOKEN입니다
 // @Tags         auth
 // @Accept       json
 // @Produce      json
 // @Param        request body GoogleVerifyRequest true "Google 인증 정보"
-// @Success      200 {object} GoogleVerifyResponse "JWT 토큰 및 사용자 정보"
-// @Failure      400 {string} string "Invalid request body or missing required fields"
-// @Failure      401 {string} string "Invalid Google ID Token"
-// @Failure      500 {string} string "Internal server error"
+// @Success      200 {object} GoogleVerifyResponse "토큰 쌍 및 사용자 정보"
+// @Header       200 {string} Cache-Control "no-store"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT"
+// @Failure      401 {object} ErrorResponse "INVALID_ID_TOKEN"
+// @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Router       /auth/google/verify [post]
 func (h *AuthHandler) GoogleVerify(w http.ResponseWriter, r *http.Request) {
 	// 1. Content-Type 검증
 	if r.Header.Get("Content-Type") != "application/json" {
-		http.Error(w, "Content-Type must be application/json", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Content-Type must be application/json", nil)
 		return
 	}
 
 	// 2. JSON 요청 파싱
 	var req GoogleVerifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Invalid JSON", nil)
 		return
 	}
 
 	// 3. 입력 검증
 	if req.IDToken == "" {
-		http.Error(w, "id_token is required", http.StatusBadRequest)
-		return
-	}
-	if req.Email == "" {
-		http.Error(w, "email is required", http.StatusBadRequest)
-		return
-	}
-	if req.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "id_token is required", nil)
 		return
 	}
 
 	// 4. Google ID Token 검증
-	payload, err := auth.VerifyGoogleIDToken(r.Context(), req.IDToken)
+	payload, err := h.verifyIDToken(r.Context(), req.IDToken)
 	if err != nil {
-		if err == auth.ErrInvalidIDToken {
-			http.Error(w, "Invalid Google ID Token", http.StatusUnauthorized)
+		if errors.Is(err, auth.ErrInvalidIDToken) {
+			respondError(w, http.StatusUnauthorized, ErrInvalidIDToken, "Invalid Google ID Token", nil)
 			return
 		}
-		http.Error(w, "Failed to verify Google ID Token", http.StatusInternalServerError)
+		log.Printf("[ERROR] google verify: verify id token: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to verify Google ID Token", nil)
 		return
 	}
 
 	// 5. 트랜잭션 시작
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		log.Printf("[ERROR] google verify: begin transaction: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to start transaction", nil)
 		return
 	}
 	defer tx.Rollback()
 
-	// 6. Google ID로 사용자 조회
-	user, err := database.GetUserByGoogleID(r.Context(), tx, payload.GoogleID)
+	// 6. Google ID로 사용자 조회, 없으면 생성
+	// 같은 사용자의 첫 로그인이 동시에 들어와도 한쪽이 실패하지 않도록 조회·생성을 한 번에 처리합니다
+	// 다른 Google 계정이 같은 이메일을 이미 쓰고 있으면 ErrEmailTaken이 반환됩니다
+	// 이 경우도 응답은 일반 서버 에러로 두어 이메일 사용 여부를 드러내지 않고, 원인은 로그로만 남깁니다
+	user, err := database.GetOrCreateUserByGoogleID(r.Context(), tx, newUserFromGoogle(payload, req))
+	if errors.Is(err, database.ErrEmailTaken) {
+		log.Printf("[ERROR] google verify: email conflict with another google account (google_id=%s): %v", payload.GoogleID, err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get or create user", nil)
+		return
+	}
 	if err != nil {
-		http.Error(w, "Failed to get user", http.StatusInternalServerError)
+		log.Printf("[ERROR] google verify: get or create user (google_id=%s): %v", payload.GoogleID, err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to get or create user", nil)
 		return
 	}
 
-	// 7. 사용자가 없으면 생성
-	if user == nil {
-		user = &models.User{
-			Email:      req.Email,
-			Name:       req.Name,
-			PictureURL: req.Picture,
-			GoogleID:   payload.GoogleID,
-		}
-
-		if err := database.CreateUser(r.Context(), tx, user); err != nil {
-			http.Error(w, "Failed to create user", http.StatusInternalServerError)
-			return
-		}
+	// 7. 세션 발급 (Access Token + Refresh Token)
+	// Refresh Token 저장도 사용자 생성과 같은 트랜잭션에서 처리합니다
+	pair, err := issueSession(r.Context(), tx, user, h.refreshConfig, h.now())
+	if err != nil {
+		log.Printf("[ERROR] google verify: issue session: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to issue session", nil)
+		return
 	}
 
 	// 8. 트랜잭션 커밋
 	if err := tx.Commit(); err != nil {
-		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		log.Printf("[ERROR] google verify: commit transaction: %v", err)
+		respondError(w, http.StatusInternalServerError, ErrInternalServer, "Failed to commit transaction", nil)
 		return
 	}
 
-	// 9. JWT 생성
-	token, err := auth.GenerateJWT(user.ID, user.Email)
-	if err != nil {
-		http.Error(w, "Failed to generate JWT", http.StatusInternalServerError)
-		return
-	}
+	// 9. 응답
+	// 토큰이 담긴 응답은 어디에도 캐시되지 않게 합니다 (RFC 6749 5.1)
+	w.Header().Set("Cache-Control", "no-store")
+	respondJSON(w, http.StatusOK, GoogleVerifyResponse{
+		TokenPairResponse: *pair,
+		User:              user,
+	})
+}
 
-	// 10. 응답
-	response := GoogleVerifyResponse{
-		Token: token,
-		User:  user,
-	}
+// maxUserNameLength는 users.name 컬럼(VARCHAR(100))에 저장할 수 있는 최대 글자 수입니다
+// PostgreSQL VARCHAR 길이는 바이트가 아니라 글자 수 기준이므로 룬(rune) 단위로 셉니다
+const maxUserNameLength = 100
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+// newUserFromGoogle은 처음 로그인한 사용자를 생성할 때 쓸 사용자 정보를 만듭니다
+// 이메일은 Google이 검증한 ID Token 값만 씁니다. 요청 본문은 클라이언트가 임의로 바꿀 수 있기 때문입니다
+// 이름과 사진은 ID Token 값을 우선 쓰고, 없으면 요청 본문 값을 씁니다
+// 이름이 둘 다 없으면 users.name이 필수이므로 이메일을 이름으로 씁니다
+// 이름은 users.name 길이 제한을 넘지 않도록 maxUserNameLength 글자로 자릅니다
+func newUserFromGoogle(payload *auth.GoogleIDTokenPayload, req GoogleVerifyRequest) *models.User {
+	name := truncateRunes(firstNonEmpty(payload.Name, req.Name, payload.Email), maxUserNameLength)
+	picture := firstNonEmpty(payload.Picture, req.Picture)
+
+	return &models.User{
+		Email:      payload.Email,
+		Name:       name,
+		PictureURL: picture,
+		GoogleID:   payload.GoogleID,
+	}
+}
+
+// firstNonEmpty는 인자 중 처음으로 비어 있지 않은 문자열을 반환합니다 (모두 비면 빈 문자열)
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// truncateRunes는 value가 maxRunes 글자를 넘으면 앞 maxRunes 글자만 남깁니다
+// 바이트가 아니라 룬(rune) 단위로 자르므로 한글 같은 멀티바이트 문자가 중간에서 깨지지 않습니다
+func truncateRunes(value string, maxRunes int) string {
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes])
 }

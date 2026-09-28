@@ -17,10 +17,12 @@ RUN curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/
     chmod +x /usr/local/bin/migrate
 
 # Air 설치 (Go 파일 변경 시 자동 재컴파일 및 재시작)
-RUN go install github.com/air-verse/air@latest
+# 베이스 이미지의 Go 버전과 호환되는 버전으로 고정
+RUN go install github.com/air-verse/air@v1.67.1
 
 # Swag 설치 (OpenAPI 문서 생성 도구)
-RUN go install github.com/swaggo/swag/cmd/swag@latest
+# go.mod의 swaggo/swag 버전과 일치하도록 고정
+RUN go install github.com/swaggo/swag/cmd/swag@v1.16.6
 
 # Go 모듈 파일 복사 (의존성 캐싱을 위해 소스 코드보다 먼저 복사)
 # go.sum은 go mod download 실행 시 자동 생성됨
@@ -65,7 +67,8 @@ WORKDIR /app
 RUN apk add --no-cache git
 
 # Swag 설치 (OpenAPI 문서 생성 도구)
-RUN go install github.com/swaggo/swag/cmd/swag@latest
+# go.mod의 swaggo/swag 버전과 일치하도록 고정
+RUN go install github.com/swaggo/swag/cmd/swag@v1.16.6
 
 # Go 모듈 파일 복사
 # go.sum은 go mod download 실행 시 자동 생성됨

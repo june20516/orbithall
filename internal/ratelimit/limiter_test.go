@@ -1,6 +1,8 @@
 package ratelimit
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,4 +96,154 @@ func TestGetLimiter_DifferentIPs(t *testing.T) {
 	if limiter1 == limiter2 {
 		t.Fatal("Expected different limiter instances for different IPs")
 	}
+}
+
+// setLastSeen은 테스트에서 특정 키의 lastSeen을 원하는 시각으로 강제 설정합니다
+func setLastSeen(t *testing.T, rl *RateLimiter, key string, at time.Time) {
+	t.Helper()
+	v, exists := rl.visitors.Load(key)
+	if !exists {
+		t.Fatalf("key %q not found", key)
+	}
+	v.(*entry).lastSeen.Store(at.UnixNano())
+}
+
+// waitUntil은 condition이 true가 될 때까지 짧은 간격으로 폴링하고, timeout 안에
+// 만족되지 않으면 msg로 테스트를 실패시킵니다. 고정된 sleep 대신 조건 자체를 기다려
+// 부하가 걸린 환경(CI, -race)에서도 결정적으로 동작합니다
+func waitUntil(t *testing.T, timeout time.Duration, condition func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if condition() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(msg)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestCleanupIdle_RemovesOnlyStaleEntries는 idle 시간보다 오래 쓰이지 않은 항목만 지워지는지 테스트합니다
+func TestCleanupIdle_RemovesOnlyStaleEntries(t *testing.T) {
+	// Given: 두 개의 키가 등록된 RateLimiter
+	rl := NewRateLimiter(rate.Limit(10), 5)
+	rl.GetLimiter("stale-key")
+	rl.GetLimiter("fresh-key")
+
+	// When: stale-key는 40분 전, fresh-key는 5분 전에 사용된 것처럼 lastSeen을 조작한 뒤
+	// idle 30분 기준으로 CleanupIdle 호출
+	now := time.Now()
+	setLastSeen(t, rl, "fresh-key", now.Add(-5*time.Minute))
+	setLastSeen(t, rl, "stale-key", now.Add(-40*time.Minute))
+
+	removed := rl.CleanupIdle(now, 30*time.Minute)
+
+	// Then: stale-key만 지워지고 fresh-key는 남아야 함
+	if removed != 1 {
+		t.Fatalf("Expected 1 entry removed, got %d", removed)
+	}
+	if _, exists := rl.visitors.Load("stale-key"); exists {
+		t.Fatal("Expected stale-key to be removed")
+	}
+	if _, exists := rl.visitors.Load("fresh-key"); !exists {
+		t.Fatal("Expected fresh-key to remain")
+	}
+}
+
+// TestGetLimiter_UpdatesLastSeen는 GetLimiter 호출마다 lastSeen이 갱신되는지 테스트합니다
+func TestGetLimiter_UpdatesLastSeen(t *testing.T) {
+	// Given: 하나의 키가 등록된 RateLimiter
+	rl := NewRateLimiter(rate.Limit(10), 5)
+	rl.GetLimiter("key")
+
+	v, _ := rl.visitors.Load("key")
+	e := v.(*entry)
+	e.lastSeen.Store(time.Now().Add(-1 * time.Hour).UnixNano())
+	oldLastSeen := e.lastSeen.Load()
+
+	// When: 같은 키로 GetLimiter를 다시 호출
+	rl.GetLimiter("key")
+
+	// Then: lastSeen이 갱신되어 있어야 함
+	if e.lastSeen.Load() <= oldLastSeen {
+		t.Fatal("Expected lastSeen to be updated after GetLimiter call")
+	}
+}
+
+// TestStartCleanup_StopsOnContextCancel은 ctx가 취소되면 정리 고루틴이 종료되는지 테스트합니다
+func TestStartCleanup_StopsOnContextCancel(t *testing.T) {
+	// Given: 짧은 주기로 정리 고루틴을 시작한 RateLimiter
+	// (패키지 내부의 startCleanupLoop를 직접 호출해 종료 시 닫히는 done 채널을 받습니다.
+	// StartCleanup은 이 함수를 감싸기만 하므로 동작은 동일합니다)
+	rl := NewRateLimiter(rate.Limit(10), 5)
+	rl.GetLimiter("key")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := rl.startCleanupLoop(ctx, 10*time.Millisecond, 1*time.Millisecond)
+
+	// When: 정리가 최소 한 번 동작할 때까지 폴링으로 기다린 뒤 ctx를 취소
+	// (idle을 극히 짧게 두어 다음 tick에서 key가 지워지는지로 동작 여부를 확인)
+	waitUntil(t, 500*time.Millisecond, func() bool {
+		_, exists := rl.visitors.Load("key")
+		return !exists
+	}, "Expected StartCleanup goroutine to remove idle entry before deadline")
+
+	cancel()
+
+	// 고루틴이 실제로 종료될 때까지 done 채널을 기다립니다 (sleep으로 추측하지 않음)
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Expected cleanup goroutine to exit after ctx cancel")
+	}
+
+	// Then: 고루틴이 이미 종료되었으므로, 새 키를 등록해도 더 이상 정리가 일어나지 않아야 함
+	rl.GetLimiter("after-cancel")
+	if _, exists := rl.visitors.Load("after-cancel"); !exists {
+		t.Fatal("Expected entry to remain after ctx cancel, but cleanup goroutine still running")
+	}
+}
+
+// TestConcurrentGetLimiterAndCleanupIdle은 GetLimiter와 CleanupIdle을 동시에 호출해도
+// race detector가 경합을 검출하지 않는지 확인합니다
+func TestConcurrentGetLimiterAndCleanupIdle(t *testing.T) {
+	// Given: RateLimiter
+	rl := NewRateLimiter(rate.Limit(1000), 1000)
+
+	var workers sync.WaitGroup
+
+	// When: 여러 고루틴이 동시에 GetLimiter를 호출하고
+	for i := 0; i < 20; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for j := 0; j < 50; j++ {
+				rl.GetLimiter("concurrent-key")
+			}
+		}()
+	}
+
+	// 동시에 다른 고루틴이 CleanupIdle을 반복 호출
+	stop := make(chan struct{})
+	var cleanup sync.WaitGroup
+	cleanup.Add(1)
+	go func() {
+		defer cleanup.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				rl.CleanupIdle(time.Now(), time.Millisecond)
+			}
+		}
+	}()
+
+	workers.Wait()
+	close(stop)
+	cleanup.Wait() // 테스트에서 띄운 정리 고루틴이 실제로 종료될 때까지 대기
+
+	// Then: race detector가 아무것도 검출하지 않으면 성공 (go test -race로 확인)
 }
