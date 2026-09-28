@@ -326,11 +326,36 @@ func TestCreateSite(t *testing.T) {
 
 		handler.CreateSite(rec, req)
 
-		// Then: 400 Bad Request
+		// Then: 400 Bad Request, INVALID_INPUT이고 details에 name 검증 메시지
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
 		}
+		assertValidationFailed(t, rec, "name")
 	})
+}
+
+// assertValidationFailed는 응답이 INVALID_INPUT 검증 실패 에러이고 details에 field의 검증 메시지가 있는지 확인합니다
+func assertValidationFailed(t *testing.T, rec *httptest.ResponseRecorder, field string) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code    string            `json:"code"`
+			Message string            `json:"message"`
+			Details map[string]string `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("error body is not in object format: %v, body: %s", err, rec.Body.String())
+	}
+	if body.Error.Code != ErrInvalidInput {
+		t.Errorf("error.code = %q, want %q", body.Error.Code, ErrInvalidInput)
+	}
+	if body.Error.Message != "Validation failed" {
+		t.Errorf("error.message = %q, want %q", body.Error.Message, "Validation failed")
+	}
+	if body.Error.Details[field] == "" {
+		t.Errorf("error.details = %v, want a message for %q", body.Error.Details, field)
+	}
 }
 
 // TestUpdateSite는 사이트 수정 기능을 테스트합니다
@@ -445,6 +470,52 @@ func TestUpdateSite(t *testing.T) {
 		if code := readErrorCode(t, rec); code != ErrForbidden {
 			t.Errorf("error.code = %q, want %q", code, ErrForbidden)
 		}
+	})
+
+	t.Run("사이트 수정 실패 - 검증 실패", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 사용자와 사이트
+		user := &models.User{
+			Email:    "invalid-updater@example.com",
+			Name:     "Invalid Updater",
+			GoogleID: "google-invalid-updater",
+		}
+		database.CreateUser(ctx, tx, user)
+
+		site := &models.Site{
+			Name:        "Validation Site",
+			Domain:      "validation.com",
+			CORSOrigins: []string{"https://validation.com"},
+			IsActive:    true,
+		}
+		database.CreateSiteForUser(ctx, tx, site, user.ID)
+
+		// When: 빈 이름으로 수정 시도
+		requestBody := map[string]interface{}{
+			"name": "   ",
+		}
+		bodyBytes, _ := json.Marshal(requestBody)
+
+		handler := NewAdminHandler(tx)
+		req := httptest.NewRequest(http.MethodPut, "/admin/sites/"+strconv.FormatInt(site.ID, 10), bytes.NewBuffer(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(ctx, userContextKey, user))
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", strconv.FormatInt(site.ID, 10))
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		rec := httptest.NewRecorder()
+
+		handler.UpdateSite(rec, req)
+
+		// Then: 400 Bad Request, INVALID_INPUT이고 details에 name 검증 메시지
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+		}
+		assertValidationFailed(t, rec, "name")
 	})
 }
 

@@ -133,7 +133,7 @@ func (h *AdminHandler) GetSite(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        site body validators.SiteCreateInput true "사이트 생성 정보"
 // @Success      201 {object} models.Site
-// @Failure      400 {object} map[string]interface{} "Invalid input"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT (검증 실패 시 details에 필드별 메시지)"
 // @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
 // @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"
 // @Security     BearerAuth
@@ -161,11 +161,7 @@ func (h *AdminHandler) CreateSite(w http.ResponseWriter, r *http.Request) {
 
 	// 입력 검증
 	if err := input.Validate(); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-		})
+		respondValidationError(w, err)
 		return
 	}
 
@@ -199,7 +195,7 @@ func (h *AdminHandler) CreateSite(w http.ResponseWriter, r *http.Request) {
 // @Param        id   path     int  true  "Site ID"
 // @Param        site body validators.SiteUpdateInput true "사이트 수정 정보"
 // @Success      200 {object} models.Site
-// @Failure      400 {object} map[string]interface{} "Invalid input"
+// @Failure      400 {object} ErrorResponse "INVALID_INPUT (검증 실패 시 details에 필드별 메시지)"
 // @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND, UNAUTHORIZED"
 // @Failure      403 {object} ErrorResponse "FORBIDDEN"
 // @Failure      404 {object} ErrorResponse "SITE_NOT_FOUND"
@@ -237,11 +233,7 @@ func (h *AdminHandler) UpdateSite(w http.ResponseWriter, r *http.Request) {
 
 	// 입력 검증
 	if err := input.Validate(); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-		})
+		respondValidationError(w, err)
 		return
 	}
 
@@ -703,4 +695,15 @@ func (h *AdminHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 
 	// 204 No Content 응답
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// respondValidationError는 입력 검증 실패를 400 INVALID_INPUT 에러로 응답합니다
+// 필드별 검증 에러(ValidationErrors)면 details에 필드별 메시지를 담고, 그 밖의 에러는 메시지를 그대로 details에 담습니다
+func respondValidationError(w http.ResponseWriter, err error) {
+	var validationErrs validators.ValidationErrors
+	if errors.As(err, &validationErrs) {
+		respondError(w, http.StatusBadRequest, ErrInvalidInput, "Validation failed", validationErrs)
+		return
+	}
+	respondError(w, http.StatusBadRequest, ErrInvalidInput, "Validation failed", err.Error())
 }

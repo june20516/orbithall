@@ -4,7 +4,7 @@
 2026-09-28
 
 ## 버전
-v1.7 (`/admin/*` 핸들러 에러 응답 객체 형식 통일)
+v1.8 (동시 로그인 직렬화, 로그인 요청 필드 설명 정리, 사이트 검증 에러 객체 형식 통일)
 
 ## 개요
 어드민 로그인 세션에 **회전(rotation)되는 Refresh Token**을 도입해, Access Token이 만료되면 재로그인 없이 연장할 수 있게 한다.
@@ -71,7 +71,7 @@ SO THAT 토큰이 유출되어도 계속 악용되지 않는다
 ```
 - `code`: 분기용 상수. 클라이언트는 이 값만 해석한다.
 - `message`: 디버깅용. 사용자에게 그대로 보여주지 않는다.
-- `details`: 선택 필드. 이 명세의 엔드포인트에서는 쓰지 않는다.
+- `details`: 선택 필드. `/admin/sites` 생성·수정의 입력 검증 실패(400 `INVALID_INPUT`, `message`는 `"Validation failed"`)에서만 필드별 검증 메시지를 담는다(예: `{"name":"Name is required"}`). 그 밖의 에러에서는 쓰지 않는다.
 
 **이번 작업에서 형식이 바뀌는 곳** (현재 클라이언트는 상태 코드만 보므로 호환된다)
 
@@ -81,6 +81,7 @@ SO THAT 토큰이 유출되어도 계속 악용되지 않는다
 | `POST /auth/google/verify` | 평문(`text/plain`) | 객체 형식 |
 | `POST /auth/refresh`, `/auth/logout` | - | 객체 형식 |
 | `/admin/*` 핸들러 본문 | 평문(`text/plain`) | 객체 형식 |
+| `/admin/sites` 생성·수정 검증 실패 | `{"error":"<검증 메시지>"}` | 객체 형식(`details`에 필드별 메시지) |
 
 `/admin/*` 핸들러 본문의 에러도 같은 객체 형식이다(코드: INVALID_INPUT, UNAUTHORIZED, FORBIDDEN, SITE_NOT_FOUND, POST_NOT_FOUND, COMMENT_NOT_FOUND, INTERNAL_SERVER_ERROR).
 
@@ -430,3 +431,4 @@ CREATE UNIQUE INDEX idx_refresh_tokens_parent_id ON refresh_tokens(parent_id) WH
 | 2026-09-28 | v1.5 | 로그인 시 ID Token의 검증된 이메일·이름·사진 우선 사용(요청 본문 `email`·`name` 선택), 이메일 미검증 토큰 거부, 첫 로그인 동시 요청 시 사용자 생성 경합 제거, 사용자당 세션 10개 상한 | Bran |
 | 2026-09-28 | v1.6 | 세션 수 상한 계산에서 폐기·만료된 계열 제외(활성 계열만 상한 대상) | Bran |
 | 2026-09-28 | v1.7 | `/admin/*` 핸들러 본문의 평문 에러(`http.Error`)를 객체 형식으로 통일 | Bran |
+| 2026-09-28 | v1.8 | 로그인을 사용자 단위로 직렬화해 동시 로그인에도 세션 상한 유지, 로그인 요청 `email`은 사용하지 않고 `name`·`picture`는 ID Token에 없을 때만 사용함을 명확히 하고 이메일 미검증 계정 거부를 배포 행동 변경으로 기록, `/admin/sites` 생성·수정 검증 실패를 객체 형식(`INVALID_INPUT`, `details`)으로 통일 | Bran |
