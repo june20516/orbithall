@@ -71,6 +71,15 @@ func run() error {
 		return fmt.Errorf("DATABASE_URL environment variable is required")
 	}
 
+	// ============================================
+	// 인증 설정 검증
+	// ============================================
+	// Refresh Token 회전에 쓰는 비밀키가 없으면 로그인 후 토큰 갱신이 모두 실패하므로 시작 단계에서 막습니다
+	// 설정 오류가 DB 연결 실패에 가려지지 않도록 DB 연결보다 먼저 검증합니다
+	if err := auth.ValidateRefreshTokenSecret(); err != nil {
+		return err
+	}
+
 	db, err := database.New(databaseURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
@@ -78,14 +87,6 @@ func run() error {
 	defer database.Close(db)
 
 	log.Println("Database connected successfully")
-
-	// ============================================
-	// 인증 설정 검증
-	// ============================================
-	// Refresh Token 회전에 쓰는 비밀키가 없으면 로그인 후 토큰 갱신이 모두 실패하므로 시작 단계에서 막습니다
-	if err := auth.ValidateRefreshTokenSecret(); err != nil {
-		return err
-	}
 
 	// ============================================
 	// 핸들러 초기화
@@ -154,7 +155,7 @@ func run() error {
 	// 데이터베이스 헬스체크 엔드포인트 (DB 연결 상태 확인용)
 	r.Get("/health/db", func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-    
+
 		var result int
 		err := db.QueryRowContext(ctx, "SELECT 1").Scan(&result)
 

@@ -4,8 +4,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/joho/godotenv"
 )
 
 // TestRun_MissingDatabaseURL_ReturnsError는 DATABASE_URL이 없을 때 에러를 반환하는지 테스트합니다
@@ -35,7 +33,9 @@ func TestRun_MissingDatabaseURL_ReturnsError(t *testing.T) {
 
 // TestRun_InvalidDatabaseURL_ReturnsError는 잘못된 DATABASE_URL일 때 에러를 반환하는지 테스트합니다
 func TestRun_InvalidDatabaseURL_ReturnsError(t *testing.T) {
-	// Given: 잘못된 DATABASE_URL
+	// Given: 검증을 통과하는 인증 비밀키와 잘못된 DATABASE_URL
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-characters-long")
+	t.Setenv("REFRESH_TOKEN_SECRET", "test-refresh-secret-at-least-32-characters")
 	originalURL, wasSet := os.LookupEnv("DATABASE_URL")
 	os.Setenv("DATABASE_URL", "invalid://wrong")
 	defer func() {
@@ -59,13 +59,9 @@ func TestRun_InvalidDatabaseURL_ReturnsError(t *testing.T) {
 
 // TestRun_InvalidRefreshTokenSecret_ReturnsError는 REFRESH_TOKEN_SECRET이 잘못되면 서버가 시작되지 않는지 테스트합니다
 func TestRun_InvalidRefreshTokenSecret_ReturnsError(t *testing.T) {
-	// Given: 연결 가능한 DB와 비어 있는 비밀키
-	_ = godotenv.Load("../../.env")
-	testDatabaseURL := os.Getenv("TEST_DATABASE_URL")
-	if testDatabaseURL == "" {
-		t.Skip("TEST_DATABASE_URL not set, skipping integration test")
-	}
-	t.Setenv("DATABASE_URL", testDatabaseURL)
+	// Given: 연결을 시도하면 실패할 DATABASE_URL과 비어 있는 비밀키
+	// 비밀키 검증이 DB 연결보다 먼저이므로 DB 없이도 비밀키 에러가 나야 합니다
+	t.Setenv("DATABASE_URL", "postgres://unused")
 	t.Setenv("REFRESH_TOKEN_SECRET", "")
 
 	// When: run() 호출
