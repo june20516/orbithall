@@ -169,3 +169,33 @@ func DeleteStaleRefreshTokens(ctx context.Context, db DBTX, userID int64, before
 
 	return nil
 }
+
+// PruneRefreshTokenFamilies는 사용자의 계열(로그인 세션) 중 가장 최근 keep개만 남기고 나머지 계열의 토큰을 모두 삭제합니다
+//
+// 계열의 최근 여부는 계열에 속한 토큰 id의 최댓값으로 판단합니다
+// id는 저장 순서대로 커지므로, 먼저 로그인했더라도 최근에 회전된 계열은 최근 계열로 봅니다
+// (created_at은 같은 트랜잭션 안에서 같은 값이 될 수 있어 순서 기준으로 쓰지 않습니다)
+// 삭제된 계열의 Refresh Token은 더 이상 조회되지 않으므로 무효 토큰으로 처리됩니다
+func PruneRefreshTokenFamilies(ctx context.Context, db DBTX, userID int64, keep int) error {
+	if keep < 1 {
+		return fmt.Errorf("keep must be at least 1, got %d", keep)
+	}
+
+	query := `
+		DELETE FROM refresh_tokens
+		WHERE user_id = $1 AND family_id IN (
+			SELECT family_id
+			FROM refresh_tokens
+			WHERE user_id = $1
+			GROUP BY family_id
+			ORDER BY MAX(id) DESC
+			OFFSET $2
+		)
+	`
+
+	if _, err := db.ExecContext(ctx, query, userID, keep); err != nil {
+		return fmt.Errorf("failed to prune refresh token families: %w", err)
+	}
+
+	return nil
+}

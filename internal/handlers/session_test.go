@@ -158,6 +158,34 @@ func TestIssueSession(t *testing.T) {
 			t.Error("expected stale token to be deleted")
 		}
 	})
+
+	t.Run("상한을 넘게 로그인하면 가장 오래된 세션이 끊기고 최근 세션은 유지된다", func(t *testing.T) {
+		ctx, tx, cleanup := testhelpers.SetupTxTest(t, db)
+		defer cleanup()
+
+		// Given: 상한보다 한 번 더 로그인한 사용자
+		user := createSessionTestUser(ctx, t, tx)
+		cfg := sessionTestConfig()
+		refreshTokens := make([]string, 0, maxSessionsPerUser+1)
+		for i := 0; i < maxSessionsPerUser+1; i++ {
+			refreshTokens = append(refreshTokens, mustIssueSession(ctx, t, tx, user, cfg).RefreshToken)
+		}
+
+		// When: 가장 처음 로그인한 Refresh Token으로 회전
+		_, err := rotateSession(ctx, tx, refreshTokens[0], cfg, unlimitedRefreshLimiter(), sessionTestTime)
+
+		// Then: 무효 토큰
+		if !errors.Is(err, errSessionInvalid) {
+			t.Errorf("expected errSessionInvalid for the oldest session, got: %v", err)
+		}
+
+		// Then: 최근 maxSessionsPerUser개 세션은 모두 회전됨
+		for i, refreshToken := range refreshTokens[1:] {
+			if _, err := rotateSession(ctx, tx, refreshToken, cfg, unlimitedRefreshLimiter(), sessionTestTime); err != nil {
+				t.Errorf("session %d: expected rotation to succeed, got: %v", i+1, err)
+			}
+		}
+	})
 }
 
 // TestRotateSession은 Refresh Token 회전 규칙을 테스트합니다

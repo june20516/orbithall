@@ -17,6 +17,10 @@ import (
 // 폐기 직후의 재사용 시도를 조사할 수 있도록 바로 지우지 않습니다
 const staleRefreshTokenRetention = 7 * 24 * time.Hour
 
+// maxSessionsPerUser는 사용자당 유지하는 로그인 세션(Refresh Token 계열) 수의 상한입니다
+// 로그인할 때마다 refresh_tokens 행이 쌓이는 것을 막으며, 상한을 넘으면 가장 오래된 세션부터 끊깁니다
+const maxSessionsPerUser = 10
+
 // 세션 규칙 위반 에러
 // SessionHandler가 각 에러를 HTTP 상태와 에러 코드로 바꿉니다
 var (
@@ -38,7 +42,7 @@ type TokenPairResponse struct {
 }
 
 // issueSession은 로그인한 사용자에게 새 세션(Access Token + 새 계열의 첫 Refresh Token)을 발급합니다
-// 같은 사용자의 오래된 Refresh Token도 함께 정리합니다
+// 같은 사용자의 오래된 Refresh Token을 정리하고, 세션 수가 maxSessionsPerUser를 넘으면 가장 오래된 세션을 삭제합니다
 func issueSession(ctx context.Context, db database.DBTX, user *models.User, cfg auth.RefreshTokenConfig, now time.Time) (*TokenPairResponse, error) {
 	if err := database.DeleteStaleRefreshTokens(ctx, db, user.ID, now.Add(-staleRefreshTokenRetention)); err != nil {
 		return nil, err
@@ -57,6 +61,11 @@ func issueSession(ctx context.Context, db database.DBTX, user *models.User, cfg 
 		familyExpiresAt,
 	)
 	if err != nil {
+		return nil, err
+	}
+
+	// 새 계열을 만든 뒤 정리해야 방금 만든 세션이 상한에 포함되어 남습니다
+	if err := database.PruneRefreshTokenFamilies(ctx, db, user.ID, maxSessionsPerUser); err != nil {
 		return nil, err
 	}
 

@@ -321,6 +321,7 @@ Next: 토큰 삭제 → /login 리다이렉트
   - 모든 요청이 Next 서버 IP 하나에서 오므로 **IP 기준 제한은 쓰지 않는다.** Refresh Token 해시 또는 family 기준으로 제한한다.
   - 기준치: family당 분당 10회
 - **만료 토큰 정리**: 로그인할 때 그 사용자의 토큰 중 절대 만료 시각 또는 폐기 시각으로부터 7일이 지난 행을 삭제한다. 별도 스케줄러는 두지 않는다.
+- **세션 수 상한**: 사용자당 활성 세션(계열)은 최근 10개까지 유지하고, 초과하면 가장 오래된 세션을 삭제한다(해당 Refresh Token은 `INVALID_REFRESH_TOKEN`). 로그인할 때 새 계열을 만든 뒤 적용하며, 최근 여부는 계열에서 가장 나중에 저장된 토큰 기준이다.
 - 전송은 HTTPS로만 한다(Render 기본).
 
 ### 클라이언트
@@ -422,4 +423,4 @@ CREATE UNIQUE INDEX idx_refresh_tokens_parent_id ON refresh_tokens(parent_id) WH
 | 2026-09-28 | v1.2 | 회전을 단일 SQL 문장으로, `replaced_by_id` → `parent_id`, rate limit은 refresh만, 로그인 시 정리, 클레임 필수화는 3단계, 에러 코드를 기존 상수(INVALID_INPUT·INTERNAL_SERVER_ERROR·RATE_LIMIT_EXCEEDED)에 맞춤 | Bran |
 | 2026-09-28 | v1.3 | Access Token 클레임(`typ`·`iss`·`aud`) 검증을 1단계에서 바로 필수로 적용 | Bran |
 | 2026-09-28 | v1.4 | 호환용 `token` 필드 제거, 전환 단계를 함께 배포 한 번으로 통합 | Bran |
-| 2026-09-28 | v1.5 | 로그인 시 ID Token의 검증된 이메일·이름·사진 우선 사용(요청 본문 `email`·`name` 선택), 이메일 미검증 토큰 거부 | Bran |
+| 2026-09-28 | v1.5 | 로그인 시 ID Token의 검증된 이메일·이름·사진 우선 사용(요청 본문 `email`·`name` 선택), 이메일 미검증 토큰 거부, 첫 로그인 동시 요청 시 사용자 생성 경합 제거, 사용자당 세션 10개 상한 | Bran |
