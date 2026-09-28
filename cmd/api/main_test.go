@@ -2,7 +2,10 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
+
+	"github.com/joho/godotenv"
 )
 
 // TestRun_MissingDatabaseURL_ReturnsError는 DATABASE_URL이 없을 때 에러를 반환하는지 테스트합니다
@@ -52,4 +55,27 @@ func TestRun_InvalidDatabaseURL_ReturnsError(t *testing.T) {
 	}
 
 	t.Logf("expected behavior: database connection failed - %v", err)
+}
+
+// TestRun_InvalidRefreshTokenSecret_ReturnsError는 REFRESH_TOKEN_SECRET이 잘못되면 서버가 시작되지 않는지 테스트합니다
+func TestRun_InvalidRefreshTokenSecret_ReturnsError(t *testing.T) {
+	// Given: 연결 가능한 DB와 비어 있는 비밀키
+	_ = godotenv.Load("../../.env")
+	testDatabaseURL := os.Getenv("TEST_DATABASE_URL")
+	if testDatabaseURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping integration test")
+	}
+	t.Setenv("DATABASE_URL", testDatabaseURL)
+	t.Setenv("REFRESH_TOKEN_SECRET", "")
+
+	// When: run() 호출
+	err := run()
+
+	// Then: 비밀키 에러로 시작 실패
+	if err == nil {
+		t.Fatal("expected error when REFRESH_TOKEN_SECRET is invalid, got nil")
+	}
+	if !strings.Contains(err.Error(), "REFRESH_TOKEN_SECRET") {
+		t.Errorf("expected REFRESH_TOKEN_SECRET error, got: %v", err)
+	}
 }

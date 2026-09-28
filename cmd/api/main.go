@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
+	"github.com/june20516/orbithall/internal/auth"
 	"github.com/june20516/orbithall/internal/database"
 	"github.com/june20516/orbithall/internal/handlers"
 	"github.com/june20516/orbithall/internal/ratelimit"
@@ -79,11 +80,20 @@ func run() error {
 	log.Println("Database connected successfully")
 
 	// ============================================
+	// 인증 설정 검증
+	// ============================================
+	// Refresh Token 회전에 쓰는 비밀키가 없으면 로그인 후 토큰 갱신이 모두 실패하므로 시작 단계에서 막습니다
+	if err := auth.ValidateRefreshTokenSecret(); err != nil {
+		return err
+	}
+
+	// ============================================
 	// 핸들러 초기화
 	// ============================================
 	commentHandler := handlers.NewCommentHandler(db)
 	authHandler := handlers.NewAuthHandler(db)
 	adminHandler := handlers.NewAdminHandler(db)
+	sessionHandler := handlers.NewSessionHandler(db)
 
 	// ============================================
 	// Rate Limiter 초기화
@@ -164,8 +174,12 @@ func run() error {
 
 	// Auth 라우트 그룹 (/auth 접두사, 인증 불필요)
 	r.Route("/auth", func(r chi.Router) {
-		// Google OAuth 검증 및 JWT 발급
+		// Google OAuth 검증 및 토큰 발급
 		r.Post("/google/verify", authHandler.GoogleVerify)
+		// Refresh Token으로 토큰 쌍 재발급 (계열당 분당 10회 제한)
+		r.Post("/refresh", sessionHandler.Refresh)
+		// Refresh Token이 속한 세션 폐기
+		r.Post("/logout", sessionHandler.Logout)
 	})
 
 	// API 라우트 그룹 (/api 접두사)
