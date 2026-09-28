@@ -58,6 +58,7 @@ type GoogleVerifyResponse struct {
 // @Produce      json
 // @Param        request body GoogleVerifyRequest true "Google 인증 정보"
 // @Success      200 {object} GoogleVerifyResponse "토큰 쌍 및 사용자 정보"
+// @Header       200 {string} Cache-Control "no-store"
 // @Failure      400 {object} ErrorResponse "INVALID_INPUT"
 // @Failure      401 {object} ErrorResponse "INVALID_ID_TOKEN"
 // @Failure      500 {object} ErrorResponse "INTERNAL_SERVER_ERROR"

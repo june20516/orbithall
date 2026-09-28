@@ -37,7 +37,7 @@ type ListSitesResponse struct {
 // @Accept       json
 // @Produce      json
 // @Success      200 {object} ListSitesResponse
-// @Failure      401 {string} string "Unauthorized"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND"
 // @Failure      500 {string} string "Failed to get sites"
 // @Security     BearerAuth
 // @Router       /admin/sites [get]
@@ -71,7 +71,7 @@ func (h *AdminHandler) ListSites(w http.ResponseWriter, r *http.Request) {
 // @Param        id  path     int  true  "Site ID"
 // @Success      200 {object} models.Site
 // @Failure      400 {string} string "Invalid site ID"
-// @Failure      401 {string} string "Unauthorized"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND"
 // @Failure      404 {string} string "Site not found"
 // @Failure      500 {string} string "Failed to get site"
 // @Security     BearerAuth
@@ -130,7 +130,7 @@ func (h *AdminHandler) GetSite(w http.ResponseWriter, r *http.Request) {
 // @Param        site body validators.SiteCreateInput true "사이트 생성 정보"
 // @Success      201 {object} models.Site
 // @Failure      400 {object} map[string]interface{} "Invalid input"
-// @Failure      401 {string} string "Unauthorized"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND"
 // @Failure      500 {string} string "Failed to create site"
 // @Security     BearerAuth
 // @Router       /admin/sites [post]
@@ -195,7 +195,7 @@ func (h *AdminHandler) CreateSite(w http.ResponseWriter, r *http.Request) {
 // @Param        site body validators.SiteUpdateInput true "사이트 수정 정보"
 // @Success      200 {object} models.Site
 // @Failure      400 {object} map[string]interface{} "Invalid input"
-// @Failure      401 {string} string "Unauthorized"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND"
 // @Failure      403 {string} string "Forbidden"
 // @Failure      404 {string} string "Site not found"
 // @Failure      500 {string} string "Failed to update site"
@@ -311,7 +311,7 @@ func (h *AdminHandler) UpdateSite(w http.ResponseWriter, r *http.Request) {
 // @Param        id path int true "Site ID"
 // @Success      204 "No Content"
 // @Failure      400 {string} string "Invalid site ID"
-// @Failure      401 {string} string "Unauthorized"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND"
 // @Failure      403 {string} string "Forbidden"
 // @Failure      404 {string} string "Site not found"
 // @Failure      500 {string} string "Failed to delete site"
@@ -367,7 +367,7 @@ func (h *AdminHandler) DeleteSite(w http.ResponseWriter, r *http.Request) {
 // @Accept       json
 // @Produce      json
 // @Success      200 {object} models.User
-// @Failure      401 {string} string "Unauthorized"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND"
 // @Security     BearerAuth
 // @Router       /admin/profile [get]
 func (h *AdminHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
@@ -393,6 +393,7 @@ func (h *AdminHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 // @Param        id path int true "Site ID"
 // @Success      200 {object} models.SiteStats
 // @Failure      400 {string} string "Invalid site ID"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND"
 // @Failure      403 {string} string "Forbidden"
 // @Failure      500 {string} string "Failed to get site stats"
 // @Security     BearerAuth
@@ -447,6 +448,7 @@ func (h *AdminHandler) GetSiteStats(w http.ResponseWriter, r *http.Request) {
 // @Param        id path int true "Site ID"
 // @Success      200 {array} models.Post
 // @Failure      400 {string} string "Invalid site ID"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND"
 // @Failure      403 {string} string "Forbidden"
 // @Failure      500 {string} string "Failed to get posts"
 // @Security     BearerAuth
@@ -504,6 +506,7 @@ func (h *AdminHandler) ListSitePosts(w http.ResponseWriter, r *http.Request) {
 // @Param        offset query int false "오프셋 (기본값: 0)"
 // @Success      200 {object} object{comments=[]models.Comment,total=int}
 // @Failure      400 {string} string "Invalid parameters"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND"
 // @Failure      403 {string} string "Forbidden"
 // @Failure      404 {string} string "Post not found"
 // @Failure      500 {string} string "Failed to get comments"
@@ -613,7 +616,7 @@ func (h *AdminHandler) GetPostComments(w http.ResponseWriter, r *http.Request) {
 // @Param        id path int true "Comment ID"
 // @Success      204 "No Content"
 // @Failure      400 {string} string "Invalid comment ID"
-// @Failure      401 {string} string "Unauthorized"
+// @Failure      401 {object} ErrorResponse "MISSING_TOKEN, INVALID_TOKEN, EXPIRED_TOKEN, USER_NOT_FOUND"
 // @Failure      403 {string} string "Forbidden"
 // @Failure      404 {string} string "Comment not found"
 // @Failure      500 {string} string "Failed to delete comment"

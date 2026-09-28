@@ -56,6 +56,7 @@ func NewSessionHandler(db database.DBTX) *SessionHandler {
 // @Produce      json
 // @Param        request body RefreshTokenRequest true "Refresh Token"
 // @Success      200 {object} TokenPairResponse
+// @Header       200 {string} Cache-Control "no-store"
 // @Failure      400 {object} ErrorResponse "INVALID_INPUT"
 // @Failure      401 {object} ErrorResponse "INVALID_REFRESH_TOKEN, REFRESH_TOKEN_EXPIRED, REFRESH_TOKEN_REUSED, USER_NOT_FOUND"
 // @Failure      429 {object} ErrorResponse "RATE_LIMIT_EXCEEDED"
